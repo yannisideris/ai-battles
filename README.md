@@ -11,4 +11,6 @@ Plain HTML + JavaScript with [Three.js](https://threejs.org) (WebGL). No build s
 The units are 3D models generated locally (Hunyuan3D) from the original 2D unit art, then rigged and animated with Blender scripts (`tools/`).
 The enemy captain's lines use the browser's built-in speech voices.
 
+Design intent (what every mechanic is supposed to do, and why): [`docs/design.md`](docs/design.md)
+
 Run locally: `python tools/devserver.py 8642` and open http://localhost:8642

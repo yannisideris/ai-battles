@@ -121,6 +121,7 @@ export const LINES = {
         attack: ["Charge! Clatter and crush!", "Attack! No mercy for warm bodies!", "Forward! Let them hear us coming!"],
         hold: ["Hold position! Stand like tombstones!", "Nobody move! We're good at that.", "Stay! Let them come to the cemetery."],
         focus: ["Everyone, on that one! Break him!", "That one! Bring me that skull!", "Focus! One target, many swords!"],
+        split: ["Split up! Come at them from the sides!", "Around them, bones! Both flanks!", "Encircle the warm ones!"],
         fallback: ["Fall back! Reassemble behind me!", "Back! Pick up your loose bones!", "Retreat! We regroup at the graves!"],
         protect: ["To me! Guard your king!", "Protect me, you rattling fools!", "Form up around me! Now!"],
         follow: ["You lot, with me!", "Follow your king, bones!", "Stay at my heels!"],
@@ -241,6 +242,7 @@ export const LINES = {
         attack: ["Charge! For the village!", "Attack! Show them steel!", "Forward, all of you! Now!"],
         hold: ["Hold the line! Shields together!", "Stand fast! Nobody moves!", "Steady! Let them come to us!"],
         focus: ["Everyone, on that one!", "That one! Bring him down!", "Focus your attack! Together!"],
+        split: ["Split up! Hit their flanks!", "Go round them! Left and right!", "Flank them, lads!"],
         fallback: ["Fall back! Regroup on me!", "Pull back! Now!", "Retreat to me! Form up!"],
         protect: ["To me! Guard me!", "Form a circle around me!", "Protect your captain!"],
         follow: ["With me, lads!", "Follow me!", "Stay close and follow!"],
@@ -370,6 +372,7 @@ export const LINES = {
         attack: ["Έφοδος! Κροταλίστε και λιώστε!", "Επίθεση! Κανένα έλεος στα ζεστά κορμιά!", "Εμπρός! Ν' ακούσουν ότι ερχόμαστε!"],
         hold: ["Κρατήστε θέση! Σταθείτε σαν ταφόπλακες!", "Κανείς να μην κουνηθεί! Σ' αυτό είμαστε καλοί.", "Μείνετε! Ας έρθουν αυτοί στο νεκροταφείο."],
         focus: ["Όλοι σε εκείνον! Σπάστε τον!", "Εκείνον! Φέρτε μου το κρανίο του!", "Συγκεντρωθείτε! Ένας στόχος, πολλά σπαθιά!"],
+        split: ["Χωριστείτε! Από τα πλάγια!", "Γύρω τους, κόκαλα! Και από τις δύο μεριές!", "Κυκλώστε τους ζωντανούς!"],
         fallback: ["Πίσω! Συναρμολογηθείτε πίσω μου!", "Πίσω! Μαζέψτε τα κόκαλα που σας πέφτουν!", "Υποχώρηση! Ανασύνταξη στους τάφους!"],
         protect: ["Σε μένα! Φυλάξτε τον βασιλιά σας!", "Προστατέψτε με, κροταλιστά κουφάρια!", "Γύρω μου! Τώρα!"],
         follow: ["Εσείς, μαζί μου!", "Ακολουθήστε τον βασιλιά σας, κόκαλα!", "Κολλητά πίσω μου!"],
@@ -490,6 +493,7 @@ export const LINES = {
         attack: ["Έφοδος! Για το χωριό!", "Επίθεση! Δείξτε τους ατσάλι!", "Εμπρός, όλοι! Τώρα!"],
         hold: ["Κρατήστε τη γραμμή! Ασπίδες ενωμένες!", "Σταθερά! Κανείς να μην κουνηθεί!", "Ήρεμα! Ας έρθουν αυτοί σε εμάς!"],
         focus: ["Όλοι σε εκείνον!", "Εκείνον! Ρίξτε τον κάτω!", "Συγκεντρώστε την επίθεση! Όλοι μαζί!"],
+        split: ["Χωριστείτε! Χτυπήστε τα πλευρά τους!", "Γύρω τους! Αριστερά και δεξιά!", "Πλευροκοπήστε τους, παιδιά!"],
         fallback: ["Πίσω! Ανασύνταξη σε μένα!", "Τραβηχτείτε! Τώρα!", "Υποχώρηση προς εμένα! Παρατάξτε!"],
         protect: ["Σε μένα! Φυλάξτε με!", "Κάντε κύκλο γύρω μου!", "Προστατέψτε τον αρχηγό σας!"],
         follow: ["Μαζί μου, παιδιά!", "Ακολουθήστε με!", "Κοντά μου, πάμε!"],
@@ -506,7 +510,7 @@ export const LINES = {
 // small UI dictionary
 export const UI = {
   en: {
-    orders: ["Attack", "Hold", "With me", "Protect me", "Focus my target"],
+    orders: ["Attack", "Hold", "With me", "Protect me", "Split up"],
     victory: "VICTORY", defeat: "DEFEAT",
     enemyRouted: "The enemy broke and fled.", enemyWiped: "The enemy has been wiped out.",
     youRouted: "Your army broke and fled.", youWiped: "Your army is lost.",
@@ -517,7 +521,7 @@ export const UI = {
     notes: { advance: "advancing", hold: "holding the line", fallback: "falling back", flank: "flanking" },
   },
   el: {
-    orders: ["Επίθεση", "Κρατήστε θέση", "Μαζί μου", "Προστατέψτε με", "Στον στόχο μου"],
+    orders: ["Επίθεση", "Κρατήστε θέση", "Μαζί μου", "Προστατέψτε με", "Χωριστείτε"],
     victory: "ΝΙΚΗ", defeat: "ΗΤΤΑ",
     enemyRouted: "Ο εχθρός τράπηκε σε φυγή.", enemyWiped: "Ο εχθρός εξοντώθηκε.",
     youRouted: "Ο στρατός σου τράπηκε σε φυγή.", youWiped: "Ο στρατός σου χάθηκε.",

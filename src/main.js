@@ -555,10 +555,24 @@ class Game {
       hold: { stance: "hold", protect: false, hold: true },                     // + holdAt = where they stand
       follow: { stance: "advance", protect: false, follow: true },              // only the ones near the captain
       protect: { stance: "hold", protect: true, guard: true },
-      focus: { stance: "advance", focus: p.target ? p.target.id : null, protect: false },
+      split: { stance: "advance", protect: false, split: true },
     };
     // a short, visible "yes sir": raise the weapon / brace the shield
-    const ack = { attack: "cheer", hold: "block", follow: "cheer", protect: "block", focus: "cheer" }[o];
+    const ack = { attack: "cheer", hold: "block", follow: "cheer", protect: "block", split: "cheer" }[o];
+    // SPLIT UP: decide the wings now. Room on both sides of the enemy -> a pincer (left half / right half of the
+    // line); only one side open -> everybody goes round that side.
+    const wing = new Map();
+    if (o === "split") {
+      const gen = this.generals[p.team], { right } = gen.axes(), open = gen.flankOpenness();
+      const sol = this.alive(p.team).filter((a) => a !== p && a.type !== "archer")
+        .sort((a, b) => (a.pos.x * right.x + a.pos.z * right.y) - (b.pos.x * right.x + b.pos.z * right.y));
+      // a lane counts as usable when ~80% of it is clear; both usable -> pincer, one -> all round that side,
+      // neither -> split anyway but toward the better one (the wide swing gives up by itself if it gets stuck)
+      const both = open.left >= 0.8 && open.right >= 0.8;
+      const only = open.left >= open.right ? -1 : 1;
+      sol.forEach((a, i) => wing.set(a, both ? (i < sol.length / 2 ? -1 : 1) : only));
+      this.lastSplit = both ? "pincer" : only < 0 ? "left" : "right";
+    }
     const FOLLOW_R = 7;   // "the ones around me right now"
     for (const a of this.alive(p.team)) {
       if (a === p) continue;
@@ -570,6 +584,7 @@ class Game {
         if (!a.alive) return;
         if (!obeys) { this.bubbleAt(a, "...", 1); return; }
         a.order = { ...map[o] };
+        if (o === "split") { if (wing.has(a)) a.order.side = wing.get(a); else a.order = { stance: "advance", protect: false }; a.brain.splitReached = false; a.brain.splitT = 0; }
         if (o === "hold") a.order.holdAt = { x: a.pos.x, z: a.pos.z };
         if (o === "follow" || o === "protect") a.faceTo(p.pos.x, p.pos.z);
         a.react(a.type === "archer" ? "cheer" : ack);   // archers have no shield: they raise the bow

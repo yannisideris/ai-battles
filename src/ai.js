@@ -17,7 +17,7 @@ export const ORDERS = [
   { key: "hold", label: "Hold" },          // stand your ground: better blocks, steadier, fight only what comes
   { key: "follow", label: "With me" },     // the units near the captain stick to him and fight where he fights
   { key: "protect", label: "Protect me" }, // everyone closes in and goes for whoever threatens the captain
-  { key: "focus", label: "Focus my target" },
+  { key: "split", label: "Split up" },     // the soldiers go round the enemy's flanks (both sides if there is room)
 ];
 
 const ANCHOR_SPEED = 1.7;      // formation march speed (units are faster, so they can keep their slots)
@@ -144,6 +144,21 @@ export class General {
     return l === r ? (Math.random() < 0.5 ? "left" : "right") : l > r ? "left" : "right";
   }
 
+  // how passable each flank LANE is: the strip ~6-10 m to that side, from our line all the way up to the enemy
+  // (houses, fences, trees and the map edge along the way count against it). 0..1 per side.
+  flankOpenness() {
+    const { right, dir, foeCentre } = this.axes(), w = this.game.world, a = this.anchor;
+    const depth = Math.max(4, (foeCentre.x - a.x) * dir.x + (foeCentre.z - a.z) * dir.y);
+    const lane = (s) => {
+      let ok = 0, n = 0;
+      for (let t = 0; t <= 1.001; t += 0.125) for (const k of [6, 8, 10]) {
+        const x = foeCentre.x - dir.x * depth * (1 - t) + right.x * s * k, z = foeCentre.z - dir.y * depth * (1 - t) + right.y * s * k;
+        n++; if (w.walkable(x, z) && Math.abs(x) < 22.5 && Math.abs(z) < 31.5) ok++;
+      }
+      return ok / n;
+    };
+    return { left: lane(-1), right: lane(1) };
+  }
   flankPoint(u) {
     // a waypoint wide on the flank, level with the enemy, then the flankers turn in
     const { right, foeCentre } = this.axes();
@@ -264,7 +279,7 @@ export class Brain {
     }
     const ord = u.order || {};
     if (ord.charge) this.regrouping = false;   // a charge does not stop to lick its wounds
-    const fleeing = !lastStand && !ord.charge && u.morale < 22 * (1.4 - u.trait.bravery * 0.5) && !u.isPlayer;
+    const fleeing = !lastStand && u.morale < 22 * (1.4 - u.trait.bravery * 0.5) && !u.isPlayer;
     if (this.regrouping || fleeing || (plan.stance === "fallback" && !lastStand)) {
       const { dir } = general.axes();
       const anchor = captain ? captain.pos : { x: u.pos.x, z: g.spawnZ(u.team) };
@@ -305,6 +320,26 @@ export class Brain {
       const r = 1.6 + (j % 2) * 0.5;
       this.goal = { x: leader.pos.x + Math.sin(ang) * r, z: leader.pos.z + Math.cos(ang) * r, tol: 0.45, run: 1.2 };
       this.engaged = false; return;
+    }
+    // SPLIT UP: go wide round the enemy's flank (side chosen when the order was given), then turn in and attack
+    if (ord.split && u.type !== "archer") {
+      if (!this.splitReached) {
+        // open out sideways straight away (a ~9 m wide lane on that side), push forward along it until level with
+        // the enemy, then turn in. Seen from above it reads as the line splitting and swinging round both sides.
+        const { right, dir, foeCentre } = general.axes();
+        const lat = (u.pos.x - foeCentre.x) * right.x + (u.pos.z - foeCentre.z) * right.y;
+        const fwd = (u.pos.x - foeCentre.x) * dir.x + (u.pos.z - foeCentre.z) * dir.y;   // < 0: still in front of them
+        const L = ord.side * 9, nf = Math.min(0, fwd + 6);
+        let gx = foeCentre.x + right.x * L + dir.x * nf, gz = foeCentre.z + right.y * L + dir.y * nf;
+        const lim = 23 - 1.5, limz = 32 - 1.5; gx = Math.max(-lim, Math.min(lim, gx)); gz = Math.max(-limz, Math.min(limz, gz));
+        // ...or give up on the wide swing: lane blocked (houses, map edge), taking too long, or the endgame
+        this.splitT = (this.splitT ?? 0) + 0.25;   // decide() runs every 0.25 s for the player's side
+        const stuck = Math.hypot(gx - u.pos.x, gz - u.pos.z) < 1.5;
+        if ((Math.abs(lat - L) < 2.5 && fwd > -3) || nearest < 2.5 || stuck || this.splitT > 18 || g.endgame) this.splitReached = true;
+        else { this.goal = { x: gx, z: gz, tol: 0.8, run: 1.15 }; this.engaged = false; return; }
+      }
+      const t2 = foes.slice().sort((a, b) => u.dist(a) - u.dist(b))[0];
+      u.target = t2; this.engaged = true; this.goal = this.surroundSpot(t2, allies); return;
     }
     // PROTECT ME: whoever threatens the captain gets everyone on him
     if (ord.guard && leader) {

@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { QUALITY, ROSTER, TEAM, STATS, DIFFICULTY } from "./config.js";
 import { World } from "./world.js";
 import { loadUnitModels } from "./assets.js";
-import { Unit, rint, angDiff } from "./unit.js";
+import { Unit, rint, angDiff, HEAVY_CHARGE } from "./unit.js";
 import { Input } from "./input.js";
 import { General, Brain, ORDERS } from "./ai.js";
 import { LINES, UI } from "./lines.js";
@@ -407,7 +407,7 @@ class Game {
       };
       if (p.charging) {
         p.chargeT += this.lastDt;
-        if (!p.chargeReady && p.chargeT >= 0.45) { p.chargeReady = true; this.sfx("draw"); }
+        if (!p.chargeReady && p.chargeT >= HEAVY_CHARGE) { p.chargeReady = true; this.sfx("draw"); }
         if (!inp.attackHeld) {
           if (!p.chargeReady) {
             if (p.current === p.actions.attack) {

@@ -2,6 +2,7 @@
 import * as THREE from "three";
 import { STATS, TEAM } from "./config.js";
 import { spawnModel } from "./assets.js";
+export const HEAVY_CHARGE = 1.45;   // seconds in the raised stance before the heavy blow is ready (~1.6 s from the press)
 const PLAYER_CAPTAIN_DMG = 1.5;   // the player captain's sword (on top of full-damage quick swings)
 
 let nextId = 1;
@@ -84,8 +85,8 @@ export class Unit {
   }
 
   // player archer: after a shot the base ring turns brown and a yellow arc fills it back up; full ring = ready to shoot
-  updateReloadRing() {
-    const k = this.cooldown > 0 && this.cooldownMax ? Math.min(1, 1 - this.cooldown / this.cooldownMax) : 1;
+  // (also used for the heavy-blow charge: same brown ring filling with yellow until it is ready)
+  updateReloadRing(k) {
     if (!this.cdArc) {
       this.cdArc = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ color: 0xf1c40f, transparent: true, opacity: 0.95, depthWrite: false }));
       this.cdArc.rotation.x = -Math.PI / 2; this.cdArc.position.y = 0.025; this.root.add(this.cdArc); this.cdArcK = -1;
@@ -335,7 +336,10 @@ export class Unit {
         this.play(this.variant("idle_look", "idle_tap"), 0.25);
       } else this.play("idle", 0.25);
     }
-    if (this.isPlayer && this.type === "archer") this.updateReloadRing();
+    if (this.isPlayer) {
+      if (this.type === "archer") this.updateReloadRing(this.cooldown > 0 && this.cooldownMax ? Math.min(1, 1 - this.cooldown / this.cooldownMax) : 1);
+      else this.updateReloadRing(this.charging ? Math.min(1, this.chargeT / HEAVY_CHARGE) : 1);
+    }
     // hp bar faces camera, flash on hit
     const f = this.hpFrac(); this.hpBar.children[1].scale.x = Math.max(0.001, f); this.hpBar.children[1].position.x = -(1 - f) * 0.3;
     this.hpBar.children[1].material.color.setHSL(f * 0.33, 0.85, 0.5);

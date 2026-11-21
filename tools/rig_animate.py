@@ -43,7 +43,7 @@ bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
 bm = bmesh.new(); bm.from_mesh(body.data)
 bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-5)
 bm.to_mesh(body.data); bm.free()
-LONG = KIND in ("spearman",)   # a weapon that sticks out above the head / down to the ground (spear, staff)
+LONG = KIND in ("spearman", "staff")   # a weapon that sticks out above the head / down to the ground (spear, staff)
 def decimate():
     tris = sum(len(p.vertices) - 2 for p in body.data.polygons)
     if tris > TARGET_TRIS:
@@ -92,7 +92,7 @@ if LONG:
     tip = [v.co.copy() for v in me.vertices if v.co.z > 1.0]
     t = sum(tip, Vector()) / max(1, len(tip))
     # the boots are on the inner side (towards x=0): keep the butt search narrow in x so they don't skew the line
-    butt = [v.co.copy() for v in me.vertices if v.co.z < 0.15 and abs(v.co.x - t.x) < 0.04 and abs(v.co.y - t.y) < 0.09]
+    butt = [v.co.copy() for v in me.vertices if v.co.z < 0.15 and abs(v.co.x - t.x) < 0.08 and abs(v.co.y - t.y) < 0.09]
     if tip and butt:
         b = sum(butt, Vector()) / len(butt); axis = (t - b).normalized()
         for _ in range(2):   # refine: re-fit the line on shaft vertices near both ends
@@ -422,7 +422,7 @@ make_action("attack3", 0.62, {        # lunge: rock back, then drive the whole b
 #   Y- across the front of the body; Z- leans it outward. (Checked with the PROBE renders.)
 #   Every swing: clear wind-up with a short hold (anticipation), a fast strike that ends with the blade
 #   pointing at the enemy, a held follow-through, then recovery. Strike lands at ~50% (= unit windup 0.33 s).
-if KIND != "archer":
+if KIND not in ("archer", "brute"):   # brute: the axe hangs BELOW the hand, so the generic overhead clips fit
     for _n in ("attack", "attack2", "attack3"):
         if bpy.data.actions.get(_n): bpy.data.actions.remove(bpy.data.actions[_n])
     Z0 = {"root": {"rot": (0, 0, 0), "loc": (0, 0, 0)}, "arm.R": (0, 0, 0), "arm.L": (0, 0, 0), "chest": (0, 0, 0), "head": (0, 0, 0),
@@ -537,7 +537,7 @@ make_action("cheer2", 0.8, {           # jump for joy (loops at the end of a won
 
 # ---- sword users: "raise the sword" must LIFT the arm (bone loc), not rotate it -165 deg: the blade sits above the
 #   shoulder pivot, so a big rotation points it at the ground. Arm bone local -Y = up. (Archers keep their clips.)
-if KIND != "archer":
+if KIND not in ("archer", "brute"):
     for _n in ("cheer", "rally", "cheer2"):
         if bpy.data.actions.get(_n): bpy.data.actions.remove(bpy.data.actions[_n])
     UP = lambda h, tilt=-15, out=-12: {"rot": (tilt, 0, out), "loc": (0, -h, 0)}

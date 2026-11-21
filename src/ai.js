@@ -290,6 +290,8 @@ export class Brain {
     const leader = captain && captain.isPlayer ? captain : null;
     const shootable = (f) => { const d = u.dist(f); return d >= u.s.minRange && d <= u.s.range && g.world.lineClear(u.pos.x, u.pos.z, f.pos.x, f.pos.z); };
     // HOLD: stay on your spot, fight only what comes to you (better blocks and nerves: see unit.takeHit)
+    // nothing has happened anywhere for 30 s: "nobody is coming - we move on" (no endless standoffs)
+    if (ord.hold && g.time - g.lastHitTime > 30) { u.order = null; return; }
     if (ord.hold && ord.holdAt) {
       const at = ord.holdAt;
       if (u.type === "archer") {
@@ -297,7 +299,8 @@ export class Brain {
         if (t2) u.target = t2;
         this.goal = { x: at.x, z: at.z, tol: 0.5 }; this.engaged = false; return;
       }
-      const near = foes.filter((f) => Math.hypot(f.pos.x - at.x, f.pos.z - at.z) < 2.6).sort((a, b) => u.dist(a) - u.dist(b));
+      // a short sally: anyone who comes within ~4.5 m of our spot gets met, then we walk back to the spot
+      const near = foes.filter((f) => Math.hypot(f.pos.x - at.x, f.pos.z - at.z) < 4.5).sort((a, b) => u.dist(a) - u.dist(b));
       if (near.length) { u.target = near[0]; this.engaged = true; this.goal = u.dist(near[0]) <= u.s.range + near[0].radius ? null : this.surroundSpot(near[0], allies); return; }
       this.goal = { x: at.x, z: at.z, tol: 0.4 }; this.engaged = false; return;
     }

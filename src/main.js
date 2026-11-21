@@ -446,6 +446,9 @@ class Game {
         // turn towards a target just out of reach (no step-in: out of reach is out of reach)
         if (t && p.dist(t) < p.meleeReach(t) + 1.3) p.faceTo(t.pos.x, t.pos.z, true);
       }
+      // archer: fire while holding a direction -> shoot the enemy that way (takes priority). Nobody that way
+      // (e.g. you are running away and they are behind you) -> the automatic pick, as before.
+      if (p.type === "archer" && v.lengthSq() > 0.01) { const aimed = this.archerAim(p, foes, Math.atan2(v.x, v.z)); if (aimed) { t = aimed; p.target = aimed; } }
       const started = p.startAttack(t); p.reachBonus = 0;
       if (started) this.attackBuffer = 0;
       else if (p.type !== "archer" && this.time - (p.lastSwingT ?? -9) > 1.0) { p.freshWhiff(); this.attackBuffer = 0; }   // nothing in reach: same smooth rise (it may become a heavy blow)
@@ -457,6 +460,18 @@ class Game {
     return v;
   }
   // archer auto-aim: the enemy you are facing that is in range with a clear shot; keep the current one while it stays valid
+  // the enemy in the held direction (within ~70 degrees) that the archer can actually hit; null if none
+  archerAim(p, foes, dirAng) {
+    let best = null, bs = 1e9;
+    for (const f of foes) {
+      const d = p.dist(f);
+      if (d < p.s.minRange || d > p.s.range || !this.world.lineClear(p.pos.x, p.pos.z, f.pos.x, f.pos.z)) continue;
+      const a = Math.abs(angDiff(Math.atan2(f.pos.x - p.pos.x, f.pos.z - p.pos.z), dirAng));
+      if (a > 1.2) continue;
+      const sc = a * 3 + d * 0.1; if (sc < bs) { bs = sc; best = f; }
+    }
+    return best;
+  }
   archerPick(p, foes) {
     const ok = (f) => { const d = p.dist(f); return d >= p.s.minRange && d <= p.s.range && this.world.lineClear(p.pos.x, p.pos.z, f.pos.x, f.pos.z); };
     const ang = (f) => Math.abs(angDiff(Math.atan2(f.pos.x - p.pos.x, f.pos.z - p.pos.z), p.facing));

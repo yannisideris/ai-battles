@@ -134,6 +134,7 @@ class Game {
     this.camPos = this.player.pos.clone().add(this.camOffset());
     addEventListener("resize", () => this.resize()); this.resize();
     this.running = true; this.last = performance.now(); this.acc = 0; this.frames = 0; this.fpsT = 0;
+    this.input.pressed.clear(); this.paused = false; this.orderMenu = null; $("paused").classList.add("hidden");
     this.startedAt = performance.now();
     if (SIM) { this.runSims(SIM); return; }
     this.speak("foe", "start", { priority: true });
@@ -352,6 +353,27 @@ class Game {
   playerControl(inp) {
     const p = this.player, v = new THREE.Vector3();
     if (!p.alive) return v;
+    // pause (Esc closes an open order menu first)
+    if (inp.pause && !(this.orderMenu && inp.menuCancel && !inp.startBtn)) { this.setPaused(true); return v; }
+    // captain's order menu: Enter / RB opens, left-right picks, Enter / A confirms, Esc / B / RB closes
+    if (p.type === "captain") {
+      const bar = [...$("orders").children];
+      const mark = () => bar.forEach((b, j) => b.classList.toggle("focus", !!this.orderMenu && j === this.orderMenu.sel));
+      if (!this.orderMenu && inp.menuOpen) {
+        this.orderMenu = { sel: Math.max(0, bar.findIndex((b) => b.classList.contains("active"))) }; mark();
+        return v;
+      }
+      if (this.orderMenu) {
+        const n = bar.length;
+        if (inp.menuLeft) this.orderMenu.sel = (this.orderMenu.sel + n - 1) % n;
+        if (inp.menuRight) this.orderMenu.sel = (this.orderMenu.sel + 1) % n;
+        if (inp.menuConfirm || inp.menuA) { const i = this.orderMenu.sel; this.orderMenu = null; mark(); this.issueOrder(i); }
+        else if (inp.menuCancel || inp.menuOpen) { this.orderMenu = null; mark(); }
+        else mark();
+        this.holdT = 0; this.attackBuffer = 0;
+        return v;   // standing still while choosing (the arrows / stick are busy picking)
+      }
+    } else this.orderMenu = null;
     // screen-relative movement: "up" = away from the camera
     const fwd = new THREE.Vector3(); this.camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
     const right = new THREE.Vector3(-fwd.z, 0, fwd.x);
@@ -456,7 +478,6 @@ class Game {
         p.play(p.variant("attack", "attack2", "attack2", "attack3"), 0.06, 1.15); p.cooldown = 0.5; this.sfx("swing"); this.attackBuffer = 0;
       } else if (inp.attack && t) this.say(!this.world.lineClear(p.pos.x, p.pos.z, t.pos.x, t.pos.z) ? this.ui.noLos : p.dist(t) < p.s.minRange ? this.ui.tooClose : this.ui.outOfRange, 1.2);
     }
-    if (inp.order !== null && p.type === "captain") this.issueOrder(inp.order);
     return v;
   }
   // archer auto-aim: the enemy you are facing that is in range with a clear shot; keep the current one while it stays valid
@@ -513,7 +534,7 @@ class Game {
     const isCap = this.player && this.player.type === "captain";
     bar.classList.toggle("hidden", !isCap);
     if (!isCap) return;
-    ORDERS.forEach((o, i) => { const b = document.createElement("button"); b.textContent = `${i + 1}. ${this.ui.orders[i]}`; b.onclick = () => this.issueOrder(i); bar.appendChild(b); });
+    ORDERS.forEach((o, i) => { const b = document.createElement("button"); b.textContent = this.ui.orders[i]; b.onclick = () => this.issueOrder(i); bar.appendChild(b); });
   }
   issueOrder(i) {
     const o = ORDERS[i].key, p = this.player;
@@ -522,21 +543,38 @@ class Game {
     p.react("rally");
     this.speak("ally", o, { priority: true });
     const map = {
-      attack: { stance: "advance", protect: false },
-      hold: { stance: "hold", protect: false },
+      attack: { stance: "advance", protect: false, charge: true },              // hit harder, guard less, chase
+      hold: { stance: "hold", protect: false, hold: true },                     // + holdAt = where they stand
+      follow: { stance: "advance", protect: false, follow: true },              // only the ones near the captain
+      protect: { stance: "hold", protect: true, guard: true },
       focus: { stance: "advance", focus: p.target ? p.target.id : null, protect: false },
-      fallback: { stance: "fallback", protect: true },
-      protect: { stance: "hold", protect: true },
     };
+    // a short, visible "yes sir": raise the weapon / brace the shield
+    const ack = { attack: "cheer", hold: "block", follow: "cheer", protect: "block", focus: "cheer" }[o];
+    const FOLLOW_R = 7;   // "the ones around me right now"
     for (const a of this.alive(p.team)) {
       if (a === p) continue;
+      if (o === "follow" && a.dist(p) > FOLLOW_R) continue;   // the rest carry on with what they were doing
       // orders travel by voice: farther units hear later; scared or undisciplined ones may ignore it
       const delay = 0.3 + a.dist(p) * 0.09 + Math.random() * 0.4;
-      const obeys = a.morale > 15 && Math.random() < 0.55 + a.trait.discipline * 0.45 + this.diff.obey;
-      this.pending.push({ at: this.time + delay, fn: () => { if (!a.alive) return; if (obeys) a.order = { ...map[o] }; else this.bubbleAt(a, "...", 1); } });
+      const obeys = a.morale > 15 && Math.random() < (o === "follow" ? 0.9 : 0.55 + a.trait.discipline * 0.45 + this.diff.obey);
+      this.pending.push({ at: this.time + delay, fn: () => {
+        if (!a.alive) return;
+        if (!obeys) { this.bubbleAt(a, "...", 1); return; }
+        a.order = { ...map[o] };
+        if (o === "hold") a.order.holdAt = { x: a.pos.x, z: a.pos.z };
+        if (o === "follow" || o === "protect") a.faceTo(p.pos.x, p.pos.z);
+        a.react(a.type === "archer" ? "cheer" : ack);   // archers have no shield: they raise the bow
+      } });
     }
   }
 
+  setPaused(on) {
+    this.paused = on;
+    $("paused-title").textContent = this.settings.lang === "el" ? "Παύση" : "Paused";
+    $("paused").classList.toggle("hidden", !on);
+    if (on) try { speechSynthesis.pause(); } catch {} else try { speechSynthesis.resume(); } catch {}
+  }
   // ---------------------------------------------------------------- loop
   resize() {
     this.renderer.setSize(innerWidth, innerHeight, false);
@@ -549,6 +587,11 @@ class Game {
     const minDt = 1000 / this.q.maxFps;
     if (now - this.last < minDt - 1) return;
     let dt = Math.min(0.05, (now - this.last) / 1000); this.last = now;
+    if (this.paused) {   // Esc / Start toggles; the world stands still
+      const pin = this.input.poll();
+      if (pin.pause || pin.startBtn) this.setPaused(false);
+      return;
+    }
     // hit-stop: the world almost freezes for a split second when the player lands a blow
     if (this.hitStop > 0) { this.hitStop -= dt; dt *= 0.08; }
     this.step(dt);

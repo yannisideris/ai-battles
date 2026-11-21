@@ -22,7 +22,7 @@
   </div>
   <div id="general-line"></div>
   <div id="orders" class="hidden"></div>
-  <div id="help">Arrows / left stick: move · Space / A: attack · 1-5 / D-pad: orders</div>
+  <div id="help">Arrows / left stick: move · Space / A: attack (hold: heavy blow) · Esc / Start: pause</div>
   <div id="fps"></div>
 </div>
 <div id="bubbles"></div>
@@ -45,9 +45,10 @@
       <button data-difficulty="hard">Hard</button>
     </div>
     <button id="start" class="big">Battle!</button>
-    <p class="hint">You are the captain. If you fall, you take over one of your soldiers.<br>Gamepad: left stick move · A attack · D-pad orders</p>
+    <p class="hint">You are the captain. If you fall, you take over one of your soldiers.<br>Gamepad: left stick move · A attack</p>
   </div>
 </div>
+<div id="paused" class="overlay hidden"><div class="panel"><h1 id="paused-title">Παύση</h1></div></div>
 <div id="end" class="overlay hidden"><div class="panel"><h1 id="end-title"></h1><p id="end-sub"></p><button id="again" class="big">Again</button></div></div>
 
 <script type="module" src="src/main.js"></script>

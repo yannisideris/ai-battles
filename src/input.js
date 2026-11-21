@@ -10,7 +10,7 @@ export class Input {
     this.padPrev = [];
     this.rightStick = { x: 0, y: 0, flicked: false };
     addEventListener("keydown", (e) => {
-      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space", "Tab"].includes(e.code)) e.preventDefault();
+      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space", "Tab", "Enter"].includes(e.code)) e.preventDefault();
       if (!this.keys.has(e.code)) this.pressed.add(e.code);
       this.keys.add(e.code);
     });
@@ -27,12 +27,15 @@ export class Input {
     if (this.keys.has("ArrowRight")) mx += 1;
     if (this.keys.has("ArrowUp")) mz -= 1;
     if (this.keys.has("ArrowDown")) mz += 1;
-    let attack = this.pressed.has("Space") || this.pressed.has("Enter");
+    let attack = this.pressed.has("Space");
     let attackHeld = this.keys.has("Space");
     let cycleTarget = this.pressed.has("Tab") ? 1 : 0;
     let order = null;
-    for (const [code, o] of [["Digit1", 0], ["Digit2", 1], ["Digit3", 2], ["Digit4", 3], ["Digit5", 4]]) if (this.pressed.has(code)) order = o;
-    let aim = null, pause = this.pressed.has("Escape");
+    // captain's order menu: Enter / RB opens it, left-right picks, Enter / A confirms, Esc / B closes
+    let menuOpen = this.pressed.has("Enter") || this.pressed.has("NumpadEnter"), menuConfirm = menuOpen;
+    let menuLeft = this.pressed.has("ArrowLeft"), menuRight = this.pressed.has("ArrowRight");
+    let menuCancel = this.pressed.has("Escape"), menuA = false;
+    let aim = null, pause = this.pressed.has("Escape"), startBtn = false;
 
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
     for (const p of pads) {
@@ -44,16 +47,21 @@ export class Input {
       const btn = (i) => p.buttons[i] && p.buttons[i].pressed;
       const was = this.padPrev[p.index] || [];
       const edge = (i) => btn(i) && !was[i];
-      if (edge(0)) attack = true;                          // A = the single action button
+      if (edge(0)) { attack = true; menuA = true; }        // A = the single action button (also confirms an order)
       if (btn(0)) attackHeld = true;
-      if (edge(9)) pause = true;                           // Start
-      // D-pad = captain orders (up/right/down/left) when playing the captain
-      if (edge(12)) order = 0; if (edge(15)) order = 1; if (edge(13)) order = 2; if (edge(14)) order = 3;
+      if (edge(9)) { pause = true; startBtn = true; }      // Start
+      if (edge(5)) menuOpen = true;                        // RB opens the captain's order menu
+      if (edge(1)) menuCancel = true;                      // B closes it
+      if (edge(14)) menuLeft = true; if (edge(15)) menuRight = true;   // D-pad left / right
+      // left stick flicked sideways (for the order menu)
+      const sx = lx > 0.6 ? 1 : lx < -0.6 ? -1 : 0, psx = this.stickX?.[p.index] ?? 0;
+      if (sx !== psx) { if (sx === -1) menuLeft = true; if (sx === 1) menuRight = true; }
+      (this.stickX ??= [])[p.index] = sx;
       this.padPrev[p.index] = p.buttons.map((b) => b.pressed);
     }
     const len = Math.hypot(mx, mz); if (len > 1) { mx /= len; mz /= len; }
     const click = this.mouseClick; this.mouseClick = null;
-    const snap = { mx, mz, attack, attackHeld, cycleTarget, aim, order, click, pause };
+    const snap = { mx, mz, attack, attackHeld, cycleTarget, aim, order, click, pause, startBtn, menuOpen, menuConfirm, menuLeft, menuRight, menuCancel, menuA };
     this.pressed.clear();
     return snap;
   }

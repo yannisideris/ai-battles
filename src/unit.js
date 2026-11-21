@@ -209,7 +209,7 @@ export class Unit {
     }
     if (this.type === "archer") { this.game.fireArrow(this, t); return; }
     if (this.dist(t) > this.meleeReach(t) + (this.isPlayer ? 0.2 : 0.35)) return; // target stepped away
-    const dmg = rint(this.s.dmg);
+    const dmg = Math.round(rint(this.s.dmg) * (this.order?.charge ? 1.15 : 1));   // charging: harder blows
     // the player's quick swings: full damage at twice the rate, and the captain hits harder still - the hero should
     // feel like one, but a lone charge into a crowd still ends badly (they all hit back, and they hunt the player)
     this.game.applyHit(this, t, this.quick ? Math.round(dmg * (this.type === "captain" ? PLAYER_CAPTAIN_DMG : 1)) : dmg);
@@ -219,12 +219,12 @@ export class Unit {
     // shield block: only when facing the attacker
     if (this.s.shield && !ranged && !attacker.heavyHit && !this.charging) {   // (no guard while your sword is raised)   // a heavy blow smashes through the guard
       const ang = Math.atan2(attacker.pos.x - this.pos.x, attacker.pos.z - this.pos.z);
-      if (Math.abs(angDiff(ang, this.facing)) < 1.0 && Math.random() < (this.s.shield + (this.blocking > 0 ? 0.35 : 0)) * (attacker.isPlayer ? 0.5 : 1)) {
+      if (Math.abs(angDiff(ang, this.facing)) < 1.0 && Math.random() < (this.s.shield + (this.blocking > 0 ? 0.35 : 0) + (this.order?.hold ? 0.25 : 0)) * (this.order?.charge ? 0.6 : 1) * (attacker.isPlayer ? 0.5 : 1)) {
         this.play("block", 0.05); this.blocking = 0.35; this.game.sfx("block"); this.game.onBlock(attacker, this); return 0;
       }
     }
     this.hp -= dmg;
-    this.morale -= dmg * 0.8 / this.trait.bravery;
+    this.morale -= dmg * 0.8 / this.trait.bravery * (this.order?.hold ? 0.5 : 1);   // holding the line steadies the nerves
     this.flash = 0.16;
     if (this.hp <= 0) {
       this.die(attacker);

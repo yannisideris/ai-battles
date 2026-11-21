@@ -13,11 +13,11 @@
 import * as THREE from "three";
 
 export const ORDERS = [
-  { key: "attack", label: "Attack" },
-  { key: "hold", label: "Hold" },
+  { key: "attack", label: "Attack" },      // charge: hit harder, guard less, chase anything near
+  { key: "hold", label: "Hold" },          // stand your ground: better blocks, steadier, fight only what comes
+  { key: "follow", label: "With me" },     // the units near the captain stick to him and fight where he fights
+  { key: "protect", label: "Protect me" }, // everyone closes in and goes for whoever threatens the captain
   { key: "focus", label: "Focus my target" },
-  { key: "fallback", label: "Fall back" },
-  { key: "protect", label: "Protect me" },
 ];
 
 const ANCHOR_SPEED = 1.7;      // formation march speed (units are faster, so they can keep their slots)
@@ -262,12 +262,62 @@ export class Brain {
         }
       }
     }
-    const fleeing = !lastStand && u.morale < 22 * (1.4 - u.trait.bravery * 0.5) && !u.isPlayer;
+    const ord = u.order || {};
+    if (ord.charge) this.regrouping = false;   // a charge does not stop to lick its wounds
+    const fleeing = !lastStand && !ord.charge && u.morale < 22 * (1.4 - u.trait.bravery * 0.5) && !u.isPlayer;
     if (this.regrouping || fleeing || (plan.stance === "fallback" && !lastStand)) {
       const { dir } = general.axes();
       const anchor = captain ? captain.pos : { x: u.pos.x, z: g.spawnZ(u.team) };
       this.goal = { x: anchor.x - dir.x * 1.8 + (Math.random() - 0.5), z: anchor.z - dir.y * 1.8 + (Math.random() - 0.5), tol: 1.2, run: 1.15 };
       this.engaged = false; return;
+    }
+    // ---- the player captain's orders
+    const leader = captain && captain.isPlayer ? captain : null;
+    const shootable = (f) => { const d = u.dist(f); return d >= u.s.minRange && d <= u.s.range && g.world.lineClear(u.pos.x, u.pos.z, f.pos.x, f.pos.z); };
+    // HOLD: stay on your spot, fight only what comes to you (better blocks and nerves: see unit.takeHit)
+    if (ord.hold && ord.holdAt) {
+      const at = ord.holdAt;
+      if (u.type === "archer") {
+        const t2 = foes.filter(shootable).sort((a, b) => u.dist(a) - u.dist(b))[0] || null;
+        if (t2) u.target = t2;
+        this.goal = { x: at.x, z: at.z, tol: 0.5 }; this.engaged = false; return;
+      }
+      const near = foes.filter((f) => Math.hypot(f.pos.x - at.x, f.pos.z - at.z) < 2.6).sort((a, b) => u.dist(a) - u.dist(b));
+      if (near.length) { u.target = near[0]; this.engaged = true; this.goal = u.dist(near[0]) <= u.s.range + near[0].radius ? null : this.surroundSpot(near[0], allies); return; }
+      this.goal = { x: at.x, z: at.z, tol: 0.4 }; this.engaged = false; return;
+    }
+    // WITH ME: stick to the captain; fight whatever comes near him (or right next to you)
+    if (ord.follow && leader) {
+      const followers = allies.filter((a) => a.order && a.order.follow && a !== leader).sort((a, b) => (a.id < b.id ? -1 : 1));
+      const k = Math.max(0, followers.indexOf(u)), fac = leader.facing;
+      if (u.type === "archer") {
+        const t2 = foes.filter((f) => shootable(f) && f.dist(leader) < 7).sort((a, b) => a.dist(leader) - b.dist(leader))[0] || null;
+        if (t2) u.target = t2;
+        const arc = followers.filter((a) => a.type === "archer"), j = Math.max(0, arc.indexOf(u)), m = Math.max(1, arc.length);
+        const ang = fac + Math.PI + (j - (m - 1) / 2) * 0.55;   // a line behind the captain
+        this.goal = { x: leader.pos.x + Math.sin(ang) * 3.2, z: leader.pos.z + Math.cos(ang) * 3.2, tol: 0.6, run: 1.15 };
+        this.engaged = false; return;
+      }
+      const threat = foes.filter((f) => f.dist(leader) < 3.6 || u.dist(f) < 1.8).sort((a, b) => u.dist(a) - u.dist(b))[0];
+      if (threat) { u.target = threat; this.engaged = true; this.goal = this.surroundSpot(threat, allies); return; }
+      const mel = followers.filter((a) => a.type !== "archer"), j = Math.max(0, mel.indexOf(u)), m = Math.max(1, mel.length);
+      const ang = fac + Math.PI * 0.5 + (m > 1 ? (j / (m - 1)) * Math.PI : Math.PI / 2);   // a half ring round his back and sides
+      const r = 1.6 + (j % 2) * 0.5;
+      this.goal = { x: leader.pos.x + Math.sin(ang) * r, z: leader.pos.z + Math.cos(ang) * r, tol: 0.45, run: 1.2 };
+      this.engaged = false; return;
+    }
+    // PROTECT ME: whoever threatens the captain gets everyone on him
+    if (ord.guard && leader) {
+      const threats = foes.filter((f) => f.dist(leader) < 4.5).sort((a, b) => a.dist(leader) - b.dist(leader));
+      if (u.type === "archer") {
+        const t2 = threats.find(shootable);
+        if (t2) u.target = t2;
+        if (u.dist(leader) > 5) { this.goal = { x: leader.pos.x, z: leader.pos.z, tol: 4, run: 1.15 }; return; }
+        return this.archerGoal(u.target, plan, general);
+      }
+      if (threats.length) { u.target = threats[0]; this.engaged = true; this.goal = this.surroundSpot(threats[0], allies); return; }
+      if (u.dist(leader) > 2.6) { this.goal = { x: leader.pos.x, z: leader.pos.z, tol: 2.2, run: 1.15 }; return; }
+      this.goal = null; return;
     }
     if (plan.protect && captain && u.type === "soldier" && u.dist(captain) > 3.5) {
       this.goal = { x: captain.pos.x, z: captain.pos.z, tol: 2.2 }; return;
@@ -282,7 +332,7 @@ export class Brain {
     // ---- melee: march in formation until the enemy is close, then engage
     // mop-up: with only a couple of enemies left (or no soldiers of our own) even a careful captain goes in
     const mopUp = foes.length <= 2 || !allies.some((a) => a.type === "soldier");
-    const engageR = g.endgame ? 999 : mopUp ? 30 : (ENGAGE_R[u.type] ?? 5);
+    const engageR = g.endgame ? 999 : mopUp ? 30 : ord.charge ? 14 : (ENGAGE_R[u.type] ?? 5);
     this.engaged = nearest < engageR || (this.engaged && nearest < 9);
     const flanker = general.flankers.has(u);
     if (flanker && !this.flankReached && best && plan.flank) {

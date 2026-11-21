@@ -43,10 +43,14 @@ bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
 bm = bmesh.new(); bm.from_mesh(body.data)
 bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-5)
 bm.to_mesh(body.data); bm.free()
-tris = sum(len(p.vertices) - 2 for p in body.data.polygons)
-if tris > TARGET_TRIS:
-    m = body.modifiers.new("dec", "DECIMATE"); m.ratio = TARGET_TRIS / tris; m.use_collapse_triangulate = True
-    bpy.ops.object.modifier_apply(modifier="dec")
+LONG = KIND in ("spearman",)   # a weapon that sticks out above the head / down to the ground (spear, staff)
+def decimate():
+    tris = sum(len(p.vertices) - 2 for p in body.data.polygons)
+    if tris > TARGET_TRIS:
+        m = body.modifiers.new("dec", "DECIMATE"); m.ratio = TARGET_TRIS / tris; m.use_collapse_triangulate = True
+        bpy.ops.object.modifier_apply(modifier="dec")
+if not LONG:   # long weapons are cut free of the body first (after normalising), then decimated
+    decimate()
 
 # normalize: face -Y, height 1, feet on ground, centred
 body.rotation_mode = "XYZ"   # glTF import uses quaternions; euler would be ignored otherwise
@@ -55,15 +59,60 @@ bpy.ops.object.transform_apply(rotation=True)
 vs = [body.matrix_world @ v.co for v in body.data.vertices]
 mn = Vector((min(v.x for v in vs), min(v.y for v in vs), min(v.z for v in vs)))
 mx = Vector((max(v.x for v in vs), max(v.y for v in vs), max(v.z for v in vs)))
-s = 1.0 / (mx.z - mn.z)
+TOP = mx.z
+if LONG:
+    # normalise on the BODY, not the spear: top of the head = highest point near the feet' centre line,
+    # bottom = lowest point of the boots (the spear butt may reach lower)
+    low = sorted(vs, key=lambda v: v.z)[:max(50, len(vs) // 30)]
+    med = sorted(v.x for v in low)[len(low) // 2]
+    wid = mx.x - mn.x
+    boots = [v for v in low if abs(v.x - med) < wid * 0.2]
+    mn.z = min(v.z for v in boots)
+    TOP = max(v.z for v in vs if abs(v.x - med) < wid * 0.25)
+    print("LONG WEAPON: body height", round(TOP - mn.z, 3), "of", round(mx.z - mn.z, 3))
+s = 1.0 / (TOP - mn.z)
 body.scale = (s, s, s)
 bpy.ops.object.transform_apply(scale=True)
 vs = [v.co.copy() for v in body.data.vertices]
 # centre on the feet (lowest 6%) rather than the bbox, so a big shield doesn't shift the pivot
 feet = [v for v in vs if v.z - mn.z * s < 0.06]
+if LONG:   # leave the spear butt out of the feet centre
+    _m = sorted(v.x for v in feet)[len(feet) // 2]
+    feet = [v for v in feet if abs(v.x - _m) < 0.15]
 cx = sum(v.x for v in feet) / len(feet); cy = sum(v.y for v in feet) / len(feet)
 for v in body.data.vertices:
     v.co.x -= cx; v.co.y -= cy; v.co.z -= mn.z * s
+
+SPEAR = None   # (base point, axis) of the spear line
+if LONG:
+    # Find the pole: tip = what sticks out above the head, butt = lowest part under the tip. Cut its faces free from
+    # the body BEFORE decimating, otherwise the decimator bridges shaft and leg/helmet with long triangles that
+    # stretch into "sails" as soon as the arm moves.
+    me = body.data
+    tip = [v.co.copy() for v in me.vertices if v.co.z > 1.0]
+    t = sum(tip, Vector()) / max(1, len(tip))
+    # the boots are on the inner side (towards x=0): keep the butt search narrow in x so they don't skew the line
+    butt = [v.co.copy() for v in me.vertices if v.co.z < 0.15 and abs(v.co.x - t.x) < 0.04 and abs(v.co.y - t.y) < 0.09]
+    if tip and butt:
+        b = sum(butt, Vector()) / len(butt); axis = (t - b).normalized()
+        for _ in range(2):   # refine: re-fit the line on shaft vertices near both ends
+            def dl(co): p = co - b; return (p - axis * p.dot(axis)).length
+            lo = [v.co.copy() for v in me.vertices if v.co.z < 0.3 and dl(v.co) < 0.03]
+            hi = [v.co.copy() for v in me.vertices if 0.7 < v.co.z < 0.95 and dl(v.co) < 0.03]
+            if lo and hi:
+                b = sum(lo, Vector()) / len(lo); t2 = sum(hi, Vector()) / len(hi); axis = (t2 - b).normalized()
+        SPEAR = (b, axis)
+        def near(co, r=0.035):
+            p = co - b; return (p - axis * p.dot(axis)).length < r and co.x < -0.08
+        bm = bmesh.new(); bm.from_mesh(me)
+        sp = {f for f in bm.faces if all(near(v.co) for v in f.verts)}
+        cut = [e for e in bm.edges if len(e.link_faces) > 1 and len({f in sp for f in e.link_faces}) > 1]
+        bmesh.ops.split_edges(bm, edges=cut)
+        bm.to_mesh(me); bm.free()
+        print("SPEAR_CUT faces", len(sp), "edges", len(cut), "tip", tuple(round(c, 3) for c in t), "butt", tuple(round(c, 3) for c in b))
+    else:
+        print("SPEAR: no tip/butt found", len(tip), len(butt))
+    decimate()
 vs = [v.co.copy() for v in body.data.vertices]
 
 # materials: no metal shine, downscale textures
@@ -167,7 +216,7 @@ import os, heapq
 # "head" region and got head weights, so it stayed behind and stretched into a grey fan when the arm moved.
 # Fix by distance ALONG THE SURFACE: whatever is reached sooner from the hand (through the blade) than from the
 # top of the head belongs to the arm. (Archers keep their original weights.)
-if KIND != "archer":
+if KIND != "archer" and not LONG:   # the spear has its own rigid fix below
     me = body.data
     adj = [[] for _ in me.vertices]
     for e in me.edges:
@@ -195,6 +244,28 @@ if KIND != "archer":
             for g in ("head", "chest", "hips"): groups[g].remove([v.index])
             groups[lab[v.index]].add([v.index], 1.0, "REPLACE"); moved += 1
     print("WEAPON_TIP_FIX moved", moved)
+
+if SPEAR:
+    # the spear is now its own loose piece(s): every island lying along the spear line goes rigidly to the right arm
+    b, axis = SPEAR; me = body.data
+    par = list(range(len(me.vertices)))
+    def find(i):
+        while par[i] != i: par[i] = par[par[i]]; i = par[i]
+        return i
+    for e in me.edges:
+        a, c = find(e.vertices[0]), find(e.vertices[1])
+        if a != c: par[a] = c
+    isl = {}
+    for v in me.vertices: isl.setdefault(find(v.index), []).append(v)
+    n = 0
+    for vs_ in isl.values():
+        def dl(co): p = co - b; return (p - axis * p.dot(axis)).length
+        close = sum(1 for v in vs_ if dl(v.co) < 0.05)
+        if close > 0.8 * len(vs_):
+            for v in vs_:
+                for g in groups.values(): g.remove([v.index])
+                groups["arm.R"].add([v.index], 1.0, "REPLACE"); n += 1
+    print("SPEAR_RIGID verts", n, "islands", len(isl))
 
 if os.environ.get("DUMP_ARM"):
     gi = groups["arm.R"].index
@@ -381,6 +452,39 @@ if KIND != "archer":
         1.0: Z0,
     }, loop=False)
 
+def spear_clips():   # called after all generic clips, so these replace them
+    # ---- spear: the pole runs parallel to the arm bone and the TIP is above the shoulder pivot, so
+    #   arm.R X+ ~90 = spear level, pointing forward (hand slightly back) - the couched spear.
+    for _n in ("attack", "attack2", "attack3"):
+        if bpy.data.actions.get(_n): bpy.data.actions.remove(bpy.data.actions[_n])
+    Z0 = {"root": {"rot": (0, 0, 0), "loc": (0, 0, 0)}, "arm.R": (0, 0, 0), "arm.L": (0, 0, 0), "chest": (0, 0, 0), "head": (0, 0, 0),
+          "thigh.L": (0, 0, 0), "thigh.R": (0, 0, 0), "shin.L": (0, 0, 0), "shin.R": (0, 0, 0)}
+    def thrust(pull, yaw, lunge, aim=(90, 0, 0)):
+        return {
+            0.0: Z0,
+            0.28: {"root": {"rot": (0, 0, -yaw), "loc": (0, pull, 0)}, "arm.R": (80, 0, 0), "arm.L": (-25, 0, 10),
+                   "chest": (10, 0, -10), "head": (-6, 0, 8), "thigh.R": (14, 0, 0)},
+            0.40: {"root": {"rot": (0, 0, -yaw), "loc": (0, pull + 0.02, 0)}, "arm.R": (82, 0, 0), "arm.L": (-25, 0, 10),
+                   "chest": (12, 0, -10), "head": (-6, 0, 8), "thigh.R": (16, 0, 0)},
+            0.50: {"root": {"rot": (0, 0, yaw * 0.4), "loc": (0, -lunge, 0)}, "arm.R": aim, "arm.L": (-10, 0, 10),
+                   "chest": (-18, 0, 6), "head": (-8, 0, 0), "thigh.L": (-45, 0, 0), "shin.L": (25, 0, 0), "thigh.R": (25, 0, 0)},
+            0.70: {"root": {"rot": (0, 0, yaw * 0.4), "loc": (0, -lunge, 0)}, "arm.R": aim, "arm.L": (-10, 0, 10),
+                   "chest": (-18, 0, 6), "head": (-8, 0, 0), "thigh.L": (-45, 0, 0), "shin.L": (25, 0, 0), "thigh.R": (25, 0, 0)},
+            1.0: Z0,
+        }
+    make_action("attack", 0.7, thrust(0.08, 20, 0.22))                       # straight thrust with a step
+    make_action("attack2", 0.7, thrust(0.05, 40, 0.15, (92, -20, 0)))        # thrust swept across the front
+    make_action("attack3", 0.7, thrust(0.12, 10, 0.32, (84, 0, 0)))          # long lunge, slightly high
+    if bpy.data.actions.get("idle_tap"): bpy.data.actions.remove(bpy.data.actions["idle_tap"])
+    make_action("idle_tap", 1.4, {      # thump the spear butt on the ground twice
+        0.0: {"arm.R": {"loc": (0, 0, 0)}}, 0.2: {"arm.R": {"loc": (0, -0.06, 0)}}, 0.3: {"arm.R": {"loc": (0, 0.01, 0)}},
+        0.5: {"arm.R": {"loc": (0, -0.06, 0)}}, 0.6: {"arm.R": {"loc": (0, 0.01, 0)}}, 1.0: {"arm.R": {"loc": (0, 0, 0)}},
+    }, loop=False)
+    make_action("ready", 1.6, {         # braced, spear levelled at the enemy (fighting / hold)
+        0.0: {"arm.R": (88, 0, 0), "arm.L": (-30, 0, 10), "chest": (-6, 0, 0), "thigh.L": (-20, 0, 0), "shin.L": (15, 0, 0), "thigh.R": (15, 0, 0), "hips": {"loc": (0, 0, -0.02)}},
+        0.5: {"arm.R": (86, 0, 0), "arm.L": (-30, 0, 10), "chest": (-4, 0, 0), "thigh.L": (-20, 0, 0), "shin.L": (15, 0, 0), "thigh.R": (15, 0, 0), "hips": {"loc": (0, 0, -0.03)}},
+    })
+
 make_action("death_fwd", 1.0, {
     0.0: {"root": {"rot": (0, 0, 0)}, "chest": (0, 0, 0), "arm.L": (0, 0, 0), "arm.R": (0, 0, 0), "head": (0, 0, 0)},
     0.3: {"root": {"rot": (10, 0, 0)}, "chest": (-15, 0, 0), "arm.L": (25, 0, 10), "arm.R": (25, 0, -10), "head": (-10, 0, 0)},
@@ -457,6 +561,9 @@ if KIND != "archer":
         0.4: {"root": {"loc": (0, 0, 0.18)}, "arm.R": UP(0.17, -25), "arm.L": (-40, 0, 20), "thigh.L": (0, 0, 0), "thigh.R": (0, 0, 0), "shin.L": (5, 0, 0), "shin.R": (5, 0, 0)},
     })
 
+if LONG:
+    spear_clips()
+
 rig.animation_data.action = None
 for b in pb:
     b.rotation_euler = (0, 0, 0); b.location = (0, 0, 0)
@@ -485,6 +592,8 @@ if RENDER:
     cam.location = Vector((-1.6, -2.4, 1.3))
     if len(argv) > 5 and argv[5] == "top":       # roughly the in-game camera: high, from the front
         cam.location = Vector((0, -2.0, 2.6))
+    if len(argv) > 5 and argv[5] == "side":      # from the character's right: shows reach / weapon direction
+        cam.location = Vector((-2.8, -0.4, 0.9))
     cam.rotation_euler = (Vector((0, 0, 0.45)) - cam.location).to_track_quat("-Z", "Y").to_euler()
     shots = [("rest", None, 0), ("walk", "walk", 0.0), ("attack_up", "attack", 0.35), ("attack_hit", "attack", 0.55),
              ("block", "block", 1.0), ("shoot", "shoot", 0.7), ("death", "death", 1.0),
@@ -492,6 +601,7 @@ if RENDER:
              ("death_fwd", "death_fwd", 1.0), ("death_back", "death_back", 1.0), ("idle_look", "idle_look", 0.3),
              ("idle_tap", "idle_tap", 0.35), ("laugh", "laugh", 0.15), ("fear", "fear", 0.0), ("rally", "rally", 0.35),
              ("rally_point", "rally", 0.75), ("cheer2", "cheer2", 0.5)]
+    if bpy.data.actions.get("ready"): shots.append(("ready", "ready", 0.0))
     if len(argv) > 6:   # frame-by-frame sequence of one clip, e.g. "attack2"
         shots = [(f"{c}_{i}", c, i / 7) for c in argv[6].split(",") for i in range(8)]   # one or more clips, comma separated
         cam.data.ortho_scale = 1.3

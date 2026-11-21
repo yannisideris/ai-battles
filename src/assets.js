@@ -63,7 +63,9 @@ export async function loadUnitModels(quality, onProgress = () => {}) {
   for (const team of Object.keys(MODEL_FILES)) for (const type of Object.keys(MODEL_FILES[team])) entries.push([team, type]);
   let done = 0;
   await Promise.all(entries.map(async ([team, type]) => {
-    const gltf = await loadOne(MODEL_FILES[team][type]);
+    // dev preview of new art: ?preview_human_soldier=human_spearman swaps in assets/models/human_spearman.glb
+    const swap = new URLSearchParams(location.search).get(`preview_${team}_${type}`);
+    const gltf = await loadOne(swap ? `assets/models/${swap.replace(/[^\w-]/g, "")}.glb` : MODEL_FILES[team][type]);
     templates[team] ??= {};
     if (gltf) { toToon(gltf.scene, quality.outline); templates[team][type] = { scene: gltf.scene, clips: gltf.animations }; }
     onProgress(++done / entries.length);

@@ -62,3 +62,32 @@ Known weak spots: small painted emblems on shields (skull, sword) come out muddy
   - Key every bone in every action, or poses leak between clips.
   - Archers from these models hold the bow in the RIGHT hand (`kind=archer` mirrors the shoot clip).
 - Result: ~0.8–0.9 MB per unit GLB.
+
+## Pixal3D in ComfyUI (best so far, 2026-11-21)
+
+- **What:** TencentARC Pixal3D (MIT, built on TRELLIS.2): pixel-aligned image→3D with PBR colour.
+  Much more faithful than Hunyuan: emblems, faces and colours come out almost exactly like the drawing.
+- **Install (Windows, isolated):** ComfyUI portable v0.46 (`ComfyUI_windows_portable_nvidia.7z`, extracted with
+  `C:\Windows\System32\tar.exe -xf`) in `C:\ComfyUI`. Pixal3D nodes are built in. Weights (Comfy-Org on Hugging Face):
+  `diffusion_models/pixal3d_int8_convrot`, `clip_vision/dino_v3_L_naf_fp32`, `vae/trellis_2_shape_vae_bf16`,
+  `vae/trellis_2_texture_vae_bf16`, `geometry_estimation/moge_2_vitl_normal_fp16`, `background_removal/birefnet` (~11 GB total).
+- **Run:** template `3d_pixal3d_trellis2_image_to_model` (switch "Trellis2" = false). Changes: LoadImage = our PNG,
+  node 40 (unused TRELLIS.2 UNet) set to the pixal3d file so validation passes, upsample 1536 → 1024, texture 4096 → 2048.
+  RTX 5060 Ti 16 GB: **~68 s per model, ~10 GB VRAM**. Output `ComfyUI/output/3d/*.glb` (~700k tris, 3×2048 textures).
+- Stop ComfyUI before running the game or other GPU work.
+
+## New unit art (ChatGPT image) - what works
+
+- Give ONLY the original images (`human_soldier`, `human_archer_idle`; add the captain only for captains) and a
+  one-line unit description. Long rule lists made GPT drift away from the style (taller, different faces).
+- Ask for a calm standing pose, weapon in one hand at the side. Two-handed / across-the-body poses fuse with the body.
+- The rig expects the weapon in the RIGHT hand: mirror images that have it in the left before 3D.
+
+## Rigging long weapons (spear, staff)
+
+`rig_animate.py ... spearman`: normalises on the body (not the spear tip), finds the pole line (tip above the head →
+butt by the feet, refit on the shaft), **cuts the pole faces free before decimating** (otherwise the decimator bridges
+shaft and leg/helmet with long triangles that stretch into "sails"), then makes every pole island rigid on `arm.R`.
+Spear clips: `attack/attack2/attack3` thrusts (arm.R X≈+90 = spear level, pointing forward), `idle_tap` (butt on the
+ground), `ready` (braced, spear levelled). Camera option `side` for checking reach.
+Preview in game: `?preview_human_soldier=human_spearman` swaps the model (dev only).

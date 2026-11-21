@@ -275,13 +275,33 @@ make_action("block", 0.4, {
 }, loop=False)
 # bow hand / draw hand; the generated archers hold the bow in the RIGHT hand
 BOW, DRAW, TW = ("arm.R", "arm.L", -1) if KIND == "archer" else ("arm.L", "arm.R", 1)
-make_action("shoot", 1.0, {
-    0.0: {BOW: (0, 0, 0), DRAW: (0, 0, 0), "chest": (0, 0, 0)},
-    0.3: {BOW: (-85, 0, 0), DRAW: (-85, 0, 0), "chest": (0, 0, 30 * TW)},              # raise bow, nock
-    0.7: {BOW: (-90, 0, 0), DRAW: (-60, 0, -35 * TW), "chest": (0, 0, 35 * TW)},       # draw
-    0.75: {BOW: (-90, 0, 0), DRAW: (-75, 0, 10 * TW), "chest": (-4, 0, 30 * TW)},      # release
-    1.0: {BOW: (0, 0, 0), DRAW: (0, 0, 0), "chest": (0, 0, 0)},
-}, loop=False)
+def set_interp(act, frac, mode, length_s):
+    """make the segment that starts at key `frac` LINEAR / CONSTANT (snappy) instead of the default eased BEZIER"""
+    frame = 1 + round(frac * (max(2, round(length_s * FPS)) - 1))
+    curves = list(getattr(act, "fcurves", []) or [])
+    if not curves:   # Blender 4.4+ layered actions
+        for layer in act.layers:
+            for strip in layer.strips:
+                for bag in strip.channelbags: curves += list(bag.fcurves)
+    for fc in curves:
+        for kp in fc.keyframe_points:
+            if abs(kp.co.x - frame) < 0.5: kp.interpolation = mode
+
+# shoot: a decisive shot read from above - snap the bow up and turn side-on, pull the string right back to the
+# face, a still moment on aim, then a sharp release (string hand flies back, bow kicks) held for a beat.
+# The arrow leaves at 0.70 (= archer windup 0.70 s), so the timing of the game does not change.
+_shoot = {
+    0.0:  {BOW: (0, 0, 0), DRAW: (0, 0, 0), "chest": (0, 0, 0), "head": (0, 0, 0)},
+    0.10: {BOW: (-88, 0, 0), DRAW: (-88, 0, 0), "chest": (0, 0, 38 * TW), "head": (0, 0, -12 * TW)},        # bow up, side-on
+    0.16: {BOW: (-93, 0, 0), DRAW: (-90, 0, 0), "chest": (0, 0, 41 * TW), "head": (0, 0, -14 * TW)},        # settle
+    0.45: {BOW: (-92, 0, 0), DRAW: (-55, 0, -55 * TW), "chest": (-3, 0, 45 * TW), "head": (0, 0, -18 * TW)}, # full draw
+    0.68: {BOW: (-92, 0, 0), DRAW: (-54, 0, -58 * TW), "chest": (-3, 0, 46 * TW), "head": (0, 0, -18 * TW)}, # aim
+    0.73: {BOW: (-101, 0, 0), DRAW: (-72, 0, -88 * TW), "chest": (2, 0, 41 * TW), "head": (0, 0, -16 * TW)}, # release!
+    0.86: {BOW: (-97, 0, 0), DRAW: (-74, 0, -82 * TW), "chest": (0, 0, 39 * TW), "head": (0, 0, -14 * TW)},  # follow-through
+    1.0:  {BOW: (0, 0, 0), DRAW: (0, 0, 0), "chest": (0, 0, 0), "head": (0, 0, 0)},
+}
+_act = make_action("shoot", 1.0, _shoot, loop=False)
+set_interp(_act, 0.68, "LINEAR", 1.0)   # the release is a snap, not a glide
 make_action("hit", 0.35, {
     0.0: {"chest": (0, 0, 0), "head": (0, 0, 0), "hips": {"loc": (0, 0, 0)}},
     0.3: {"chest": (14, 0, -6), "head": (12, 0, 0), "hips": {"loc": (0, 0.04, 0)}},

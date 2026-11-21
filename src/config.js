@@ -25,7 +25,7 @@ export const DIFFICULTY = {
 
 export const TEAM = {
   human:    { name: "Humans",    color: 0x3fa7c9, spawnZ: 27,  facing: Math.PI },
-  skeleton: { name: "Skeletons", color: 0xe46aa8, spawnZ: -27, facing: 0, archerRate: 0.98 },   // archerRate: tiny balance trim (0.95 overshot in 80 sims)
+  skeleton: { name: "Skeletons", color: 0xe46aa8, spawnZ: -27, facing: 0, archerRate: 1.0 },   // archerRate: balance trim knob (0.98 was needed before the obstacle-collision change, not after)
 };
 
 export const QUALITY = {

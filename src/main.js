@@ -448,7 +448,7 @@ class Game {
       }
       // archer: fire while holding a direction -> shoot the enemy that way (takes priority). Nobody that way
       // (e.g. you are running away and they are behind you) -> the automatic pick, as before.
-      if (p.type === "archer" && v.lengthSq() > 0.01) { const aimed = this.archerAim(p, foes, Math.atan2(v.x, v.z)); if (aimed) { t = aimed; p.target = aimed; } }
+      if (p.type === "archer" && Math.hypot(inp.mx, inp.mz) > 0.3) { const aimed = this.archerAim(p, foes, inp.mx, -inp.mz); if (aimed) { t = aimed; p.target = aimed; } }
       const started = p.startAttack(t); p.reachBonus = 0;
       if (started) this.attackBuffer = 0;
       else if (p.type !== "archer" && this.time - (p.lastSwingT ?? -9) > 1.0) { p.freshWhiff(); this.attackBuffer = 0; }   // nothing in reach: same smooth rise (it may become a heavy blow)
@@ -460,15 +460,24 @@ class Game {
     return v;
   }
   // archer auto-aim: the enemy you are facing that is in range with a clear shot; keep the current one while it stays valid
-  // the enemy in the held direction (within ~70 degrees) that the archer can actually hit; null if none
-  archerAim(p, foes, dirAng) {
+  // the enemy in the held direction that the archer can actually hit; null if none.
+  // Works the way it LOOKS on screen: directions are measured in screen space (the camera looks down at an
+  // angle, so distances "up" the screen are foreshortened), and a direction means the whole side of the screen
+  // (+-85 deg) - "left" also catches an enemy up-left or down-left - preferring whoever is closer to that
+  // direction and closer to you.
+  archerAim(p, foes, sx, sy) {
+    const fwd = new THREE.Vector3(); this.camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
+    const right = { x: -fwd.z, z: fwd.x }, tilt = 0.79;   // ~sin(camera pitch): on-screen squash of "up"
+    const want = Math.atan2(sx, sy);
     let best = null, bs = 1e9;
     for (const f of foes) {
       const d = p.dist(f);
       if (d < p.s.minRange || d > p.s.range || !this.world.lineClear(p.pos.x, p.pos.z, f.pos.x, f.pos.z)) continue;
-      const a = Math.abs(angDiff(Math.atan2(f.pos.x - p.pos.x, f.pos.z - p.pos.z), dirAng));
-      if (a > 1.2) continue;
-      const sc = a * 3 + d * 0.1; if (sc < bs) { bs = sc; best = f; }
+      const dx = f.pos.x - p.pos.x, dz = f.pos.z - p.pos.z;
+      const ex = dx * right.x + dz * right.z, ey = (dx * fwd.x + dz * fwd.z) * tilt;   // enemy offset as seen on screen
+      const a = Math.abs(angDiff(Math.atan2(ex, ey), want));
+      if (a > 1.48) continue;
+      const sc = a * 1.0 + d * 0.3; if (sc < bs) { bs = sc; best = f; }   // ~1 rad of angle = ~3 m of distance
     }
     return best;
   }

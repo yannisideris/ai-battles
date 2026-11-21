@@ -1,0 +1,8 @@
+# big source meshes, old exports and preview renders stay local
+assets/source/
+assets/models/_old/
+assets/models/_old_v1/
+_renders/
+__pycache__/
+*.blend
+*.blend1

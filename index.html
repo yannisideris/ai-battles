@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Battles</title>
+<link rel="stylesheet" href="src/style.css">
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<canvas id="view"></canvas>
+<div id="hud">
+  <div id="topbar">
+    <div class="team human"><span class="label">Humans</span><span id="count-human">0</span><div class="morale"><i id="morale-human"></i></div></div>
+    <div id="clock">0:00</div>
+    <div class="team skeleton"><span class="label">Skeletons</span><span id="count-skeleton">0</span><div class="morale"><i id="morale-skeleton"></i></div></div>
+  </div>
+  <div id="general-line"></div>
+  <div id="orders" class="hidden"></div>
+  <div id="help">Arrows / left stick: move · Space / A: attack · 1-5 / D-pad: orders</div>
+  <div id="fps"></div>
+</div>
+<div id="bubbles"></div>
+<div id="edge-arrow" class="hidden"></div>
+
+<div id="menu" class="overlay">
+  <div class="panel">
+    <h1>AI Battles</h1>
+    <div class="row"><span class="cap">Πλευρά / Side</span>
+      <button data-side="human" class="sel">Humans</button>
+      <button data-side="skeleton">Skeletons</button>
+    </div>
+    <div class="row"><span class="cap">Γλώσσα / Language</span>
+      <button data-lang="el" class="sel">Ελληνικά</button>
+      <button data-lang="en">English</button>
+    </div>
+    <div class="row"><span class="cap">Δυσκολία / Difficulty</span>
+      <button data-difficulty="easy">Easy</button>
+      <button data-difficulty="normal" class="sel">Normal</button>
+      <button data-difficulty="hard">Hard</button>
+    </div>
+    <button id="start" class="big">Battle!</button>
+    <p class="hint">You are the captain. If you fall, you take over one of your soldiers.<br>Gamepad: left stick move · A attack · D-pad orders</p>
+  </div>
+</div>
+<div id="end" class="overlay hidden"><div class="panel"><h1 id="end-title"></h1><p id="end-sub"></p><button id="again" class="big">Again</button></div></div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

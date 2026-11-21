@@ -1,0 +1,64 @@
+:root {
+  --bg: #12191b; --panel: #0d2a2a; --accent: #29ab87; --accent2: #e67e22; --text: #e0f2f1;
+  --human: #3fa7c9; --skeleton: #e46aa8;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+  font-family: "Segoe UI", Tahoma, sans-serif; overflow: hidden; user-select: none; }
+#view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+#hud { position: fixed; inset: 0; pointer-events: none; }
+#topbar { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); display: flex; gap: 18px;
+  align-items: center; background: rgba(0,0,0,.45); padding: 6px 14px; border-radius: 10px; font-weight: 600; }
+.team { display: flex; align-items: center; gap: 8px; }
+.team.human .label { color: var(--human); } .team.skeleton .label { color: var(--skeleton); }
+.morale { width: 70px; height: 6px; background: #333; border-radius: 3px; overflow: hidden; }
+.morale i { display: block; height: 100%; width: 100%; background: #f1c40f; transition: width .3s; }
+#clock { min-width: 48px; text-align: center; color: #ccc; }
+#general-line { position: absolute; top: 52px; left: 50%; transform: translateX(-50%); font-size: 13px;
+  color: #ffd8a8; text-shadow: 0 1px 2px #000; }
+#help { position: absolute; bottom: 8px; left: 10px; font-size: 12px; opacity: .7; }
+#fps { position: absolute; bottom: 8px; right: 10px; font-size: 11px; opacity: .5; }
+#orders { position: absolute; bottom: 34px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; pointer-events: auto; }
+#orders button { background: rgba(13,42,42,.9); color: var(--text); border: 2px solid #1b6e55; border-radius: 8px;
+  padding: 8px 12px; font-size: 13px; cursor: pointer; }
+#orders button.focus { border-color: #f1c40f; }
+#orders button.active { background: var(--accent); }
+#bubbles { position: fixed; inset: 0; pointer-events: none; }
+.bubble { position: absolute; transform: translate(-50%, -100%); background: #fff; color: #111; padding: 6px 10px;
+  border-radius: 10px; border: 2px solid #111; font-size: 13px; font-weight: 700; max-width: 260px; text-align: center; }
+.overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.6); }
+.hidden { display: none !important; }
+.panel { background: var(--panel); border: 3px solid var(--accent); border-radius: 14px; padding: 22px 28px; min-width: 340px; }
+.panel h1 { margin: 0 0 14px; color: var(--accent); text-align: center; }
+.row { display: flex; align-items: center; gap: 8px; margin: 10px 0; flex-wrap: wrap; }
+.row .cap { width: 170px; color: #a7f3d0; font-weight: 600; }
+.panel button { background: #003333; color: var(--text); border: 2px solid #1b6e55; border-radius: 8px; padding: 8px 12px; cursor: pointer; font-size: 14px; }
+.panel button.sel, .panel button.focus { border-color: #f1c40f; background: #145a46; }
+.panel button.big { width: 100%; margin-top: 12px; background: var(--accent2); border-color: var(--accent2); font-size: 18px; font-weight: 700; }
+.hint { font-size: 12px; opacity: .7; text-align: center; }
+@media (max-width: 600px) { .row .cap { width: 100%; } .panel { min-width: 0; margin: 0 16px; } }
+/* floating combat text */
+.pop { position: absolute; transform: translate(-50%, -50%); font-weight: 900; font-size: 22px; pointer-events: none;
+  text-shadow: 0 2px 0 #000, 0 0 6px #000; animation: popUp 0.9s ease-out forwards; font-family: "Segoe UI Black", "Arial Black", sans-serif; }
+.pop.dealt { color: #fff3b0; }
+.pop.taken { color: #ff5d5d; }
+.pop.block { color: #9fd8ff; font-size: 18px; }
+.pop.ko { color: #ffcf33; font-size: 30px; }
+@keyframes popUp { 0% { opacity: 0; transform: translate(-50%, -30%) scale(0.6); } 15% { opacity: 1; transform: translate(-50%, -80%) scale(1.25); }
+  100% { opacity: 0; transform: translate(-50%, -260%) scale(1); } }
+
+/* red arrow at the screen edge pointing to one of the last enemies */
+#edge-arrow { position: fixed; width: 0; height: 0; pointer-events: none; z-index: 5;
+  border-top: 14px solid transparent; border-bottom: 14px solid transparent; border-left: 26px solid #ff3b3b;
+  filter: drop-shadow(0 0 3px #000); animation: edgePulse 0.9s ease-in-out infinite; }
+@keyframes edgePulse { 50% { opacity: 0.55; } }
+
+/* end screen: centred, readable result line */
+#end .panel { text-align: center; min-width: 380px; }
+#end-title { font-size: 40px; letter-spacing: 2px; }
+#end-sub { font-size: 21px; font-weight: 600; margin: 4px 0 18px; }
+
+/* menu with gamepad / arrow keys: the chosen option of the row you are on lights up yellow
+   (only after the pad / keys are used - with the mouse the menu looks exactly as before) */
+.padnav .row.rowfocus button.sel { background: #f1c40f; border-color: #f1c40f; color: #111; }
+.padnav #start.padfocus { background: #f1c40f; border-color: #f1c40f; color: #111; }

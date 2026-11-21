@@ -43,13 +43,14 @@ bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
 bm = bmesh.new(); bm.from_mesh(body.data)
 bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-5)
 bm.to_mesh(body.data); bm.free()
-LONG = KIND in ("spearman", "staff")   # a weapon that sticks out above the head / down to the ground (spear, staff)
+LONG = KIND in ("spearman", "staff", "hammer")   # a weapon that sticks out above the head / down to the ground (spear, staff)
 def decimate():
     tris = sum(len(p.vertices) - 2 for p in body.data.polygons)
     if tris > TARGET_TRIS:
         m = body.modifiers.new("dec", "DECIMATE"); m.ratio = TARGET_TRIS / tris; m.use_collapse_triangulate = True
         bpy.ops.object.modifier_apply(modifier="dec")
-if not LONG:   # long weapons are cut free of the body first (after normalising), then decimated
+HANG = KIND == "brute"   # a big weapon hanging from the right hand down to the ground (axe, hammer, club)
+if not (LONG or HANG):   # those weapons are cut free of the body first (after normalising), then decimated
     decimate()
 
 # normalize: face -Y, height 1, feet on ground, centred
@@ -76,9 +77,10 @@ bpy.ops.object.transform_apply(scale=True)
 vs = [v.co.copy() for v in body.data.vertices]
 # centre on the feet (lowest 6%) rather than the bbox, so a big shield doesn't shift the pivot
 feet = [v for v in vs if v.z - mn.z * s < 0.06]
-if LONG:   # leave the spear butt out of the feet centre
-    _m = sorted(v.x for v in feet)[len(feet) // 2]
-    feet = [v for v in feet if abs(v.x - _m) < 0.15]
+if LONG or HANG:   # leave the spear butt / axe head out of the feet centre: use the head's centre line
+    _hd = sorted(v.x for v in vs if v.z - mn.z * s > 0.85)
+    _m = _hd[len(_hd) // 2]
+    feet = [v for v in feet if abs(v.x - _m) < 0.18]
 cx = sum(v.x for v in feet) / len(feet); cy = sum(v.y for v in feet) / len(feet)
 for v in body.data.vertices:
     v.co.x -= cx; v.co.y -= cy; v.co.z -= mn.z * s
@@ -89,10 +91,12 @@ if LONG:
     # the body BEFORE decimating, otherwise the decimator bridges shaft and leg/helmet with long triangles that
     # stretch into "sails" as soon as the arm moves.
     me = body.data
-    tip = [v.co.copy() for v in me.vertices if v.co.z > 1.0]
+    _side = [v.co for v in me.vertices if v.co.x < -0.18]   # the pole is held on the right: its top = highest point there
+    _ztop = max(v.z for v in _side) if _side else 2
+    tip = [c.copy() for c in _side if c.z > _ztop - 0.06]
     t = sum(tip, Vector()) / max(1, len(tip))
     # the boots are on the inner side (towards x=0): keep the butt search narrow in x so they don't skew the line
-    butt = [v.co.copy() for v in me.vertices if v.co.z < 0.15 and abs(v.co.x - t.x) < 0.08 and abs(v.co.y - t.y) < 0.09]
+    butt = [v.co.copy() for v in me.vertices if v.co.z < 0.15 and abs(v.co.x - t.x) < 0.08 and abs(v.co.y - t.y) < 0.15]
     if tip and butt:
         b = sum(butt, Vector()) / len(butt); axis = (t - b).normalized()
         for _ in range(2):   # refine: re-fit the line on shaft vertices near both ends
@@ -112,6 +116,24 @@ if LONG:
         print("SPEAR_CUT faces", len(sp), "edges", len(cut), "tip", tuple(round(c, 3) for c in t), "butt", tuple(round(c, 3) for c in b))
     else:
         print("SPEAR: no tip/butt found", len(tip), len(butt))
+    decimate()
+HANG_X = None
+if HANG:
+    # everything on the right beyond the outer edge of the right boot / hip, below the hand, is the weapon.
+    # Between the hip and the hand only the handle hangs beside the body: the widest empty gap in x there
+    # separates body and weapon.
+    me = body.data
+    xs = sorted(v.co.x for v in me.vertices if 0.3 < v.co.z < 0.42 and -0.5 < v.co.x < -0.12)
+    gap, HANG_X = 0, -0.25
+    for a, c in zip(xs, xs[1:]):
+        if c - a > gap: gap, HANG_X = c - a, (a + c) / 2
+    def inw(co): return co.z < 0.45 and co.x < (HANG_X if co.z > 0.3 else max(HANG_X, -0.255))   # the axe head reaches in beside the boot
+    bm = bmesh.new(); bm.from_mesh(me)
+    wf = {f for f in bm.faces if all(inw(v.co) for v in f.verts)}
+    cut = [e for e in bm.edges if len(e.link_faces) > 1 and len({f in wf for f in e.link_faces}) > 1]
+    bmesh.ops.split_edges(bm, edges=cut)
+    bm.to_mesh(me); bm.free()
+    print("HANG_CUT x <", round(HANG_X, 3), "faces", len(wf), "edges", len(cut))
     decimate()
 vs = [v.co.copy() for v in body.data.vertices]
 
@@ -216,7 +238,7 @@ import os, heapq
 # "head" region and got head weights, so it stayed behind and stretched into a grey fan when the arm moved.
 # Fix by distance ALONG THE SURFACE: whatever is reached sooner from the hand (through the blade) than from the
 # top of the head belongs to the arm. (Archers keep their original weights.)
-if KIND != "archer" and not LONG:   # the spear has its own rigid fix below
+if KIND != "archer" and KIND not in ("spearman", "staff"):   # the spear/staff have their own rigid fix below
     me = body.data
     adj = [[] for _ in me.vertices]
     for e in me.edges:
@@ -261,11 +283,32 @@ if SPEAR:
     for vs_ in isl.values():
         def dl(co): p = co - b; return (p - axis * p.dot(axis)).length
         close = sum(1 for v in vs_ if dl(v.co) < 0.05)
-        if close > 0.8 * len(vs_):
+        if close > 0.8 * len(vs_) or (len(vs_) < 3000 and all(v.co.x < -0.2 for v in vs_)):   # + loose bits of the weapon head beside the body
             for v in vs_:
                 for g in groups.values(): g.remove([v.index])
                 groups["arm.R"].add([v.index], 1.0, "REPLACE"); n += 1
     print("SPEAR_RIGID verts", n, "islands", len(isl))
+
+if HANG_X is not None:
+    # whole islands only (the weapon was cut free): a body vertex that merely pokes into the region stays with the
+    # body, otherwise the faces around it stretch into a sail
+    me = body.data
+    par = list(range(len(me.vertices)))
+    def find(i):
+        while par[i] != i: par[i] = par[par[i]]; i = par[i]
+        return i
+    for e in me.edges:
+        a, c = find(e.vertices[0]), find(e.vertices[1])
+        if a != c: par[a] = c
+    isl = {}
+    for v in me.vertices: isl.setdefault(find(v.index), []).append(v)
+    n = 0
+    for vs_ in isl.values():
+        if sum(1 for v in vs_ if inw(v.co)) > 0.6 * len(vs_):
+            for v in vs_:
+                for g in groups.values(): g.remove([v.index])
+                groups["arm.R"].add([v.index], 1.0, "REPLACE"); n += 1
+    print("HANG_RIGID verts", n, "islands", len(isl))
 
 if os.environ.get("DUMP_ARM"):
     gi = groups["arm.R"].index
@@ -422,7 +465,7 @@ make_action("attack3", 0.62, {        # lunge: rock back, then drive the whole b
 #   Y- across the front of the body; Z- leans it outward. (Checked with the PROBE renders.)
 #   Every swing: clear wind-up with a short hold (anticipation), a fast strike that ends with the blade
 #   pointing at the enemy, a held follow-through, then recovery. Strike lands at ~50% (= unit windup 0.33 s).
-if KIND not in ("archer", "brute"):   # brute: the axe hangs BELOW the hand, so the generic overhead clips fit
+if KIND not in ("archer", "brute", "golem"):   # brute: the axe hangs BELOW the hand, so the generic overhead clips fit
     for _n in ("attack", "attack2", "attack3"):
         if bpy.data.actions.get(_n): bpy.data.actions.remove(bpy.data.actions[_n])
     Z0 = {"root": {"rot": (0, 0, 0), "loc": (0, 0, 0)}, "arm.R": (0, 0, 0), "arm.L": (0, 0, 0), "chest": (0, 0, 0), "head": (0, 0, 0),
@@ -537,7 +580,7 @@ make_action("cheer2", 0.8, {           # jump for joy (loops at the end of a won
 
 # ---- sword users: "raise the sword" must LIFT the arm (bone loc), not rotate it -165 deg: the blade sits above the
 #   shoulder pivot, so a big rotation points it at the ground. Arm bone local -Y = up. (Archers keep their clips.)
-if KIND not in ("archer", "brute"):
+if KIND not in ("archer", "brute", "golem"):
     for _n in ("cheer", "rally", "cheer2"):
         if bpy.data.actions.get(_n): bpy.data.actions.remove(bpy.data.actions[_n])
     UP = lambda h, tilt=-15, out=-12: {"rot": (tilt, 0, out), "loc": (0, -h, 0)}
@@ -561,7 +604,7 @@ if KIND not in ("archer", "brute"):
         0.4: {"root": {"loc": (0, 0, 0.18)}, "arm.R": UP(0.17, -25), "arm.L": (-40, 0, 20), "thigh.L": (0, 0, 0), "thigh.R": (0, 0, 0), "shin.L": (5, 0, 0), "shin.R": (5, 0, 0)},
     })
 
-if LONG:
+if KIND in ("spearman", "staff"):   # hammer: head above the hand like a sword blade -> keeps the sword swings
     spear_clips()
 
 rig.animation_data.action = None

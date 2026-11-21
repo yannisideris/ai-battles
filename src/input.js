@@ -49,7 +49,7 @@ export class Input {
       const edge = (i) => btn(i) && !was[i];
       if (edge(0)) { attack = true; menuA = true; }        // A = the single action button (also confirms an order)
       if (btn(0)) attackHeld = true;
-      if (edge(9)) { pause = true; startBtn = true; }      // Start
+      if (edge(9) || edge(8)) { pause = true; startBtn = true; }   // Start (menu) or View/Back: the middle buttons
       if (edge(5)) menuOpen = true;                        // RB opens the captain's order menu
       if (edge(1)) menuCancel = true;                      // B closes it
       if (edge(14)) menuLeft = true; if (edge(15)) menuRight = true;   // D-pad left / right

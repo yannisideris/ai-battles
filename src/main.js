@@ -354,7 +354,6 @@ class Game {
     const p = this.player, v = new THREE.Vector3();
     if (!p.alive) return v;
     // pause (Esc closes an open order menu first)
-    if (inp.pause && !(this.orderMenu && inp.menuCancel && !inp.startBtn)) { this.setPaused(true); return v; }
     // captain's order menu: Enter / RB opens, left-right picks, Enter / A confirms, Esc / B / RB closes
     if (p.type === "captain") {
       const bar = [...$("orders").children];
@@ -433,6 +432,7 @@ class Game {
             if (p.current === p.actions.attack) {
               // let go before it was ready: the sword still comes down, as a normal (weaker) blow, from where it is now
               const tgt = (this.chargeFromTap && this.heldTarget && this.heldTarget.alive ? this.heldTarget : null) || aimBest();
+              p.aimTurn = tgt ? Math.abs(angDiff(Math.atan2(tgt.pos.x - p.pos.x, tgt.pos.z - p.pos.z), p.facing)) : 0;
               p.charging = false; this.chargeFromTap = false;
               const a = p.actions.attack, k = 2.2; a.paused = false; a.timeScale = k;
               if (tgt) p.faceTo(tgt.pos.x, tgt.pos.z, true);
@@ -444,7 +444,8 @@ class Game {
             p.cancelCharge();
             if (this.chargeFromTap) { p.cooldown = 0; this.chargeFromTap = false; this.attackBuffer = 0.28; return v; }
           } else {
-            p.releaseHeavy(aimBest()); this.chargeFromTap = false; p.pendingLunge = null;
+            const hb = aimBest(); p.aimTurn = hb ? Math.abs(angDiff(Math.atan2(hb.pos.x - p.pos.x, hb.pos.z - p.pos.z), p.facing)) : 0;
+            p.releaseHeavy(hb); this.chargeFromTap = false; p.pendingLunge = null;
           }
         }
         this.attackBuffer = 0;
@@ -470,6 +471,8 @@ class Game {
           const s = -d - ang * 0.9 + (f === p.target ? 0.6 : 0); if (s > bs) { bs = s; best = f; }
         }
         if (best) { t = best; p.target = best; }
+        // how well were YOU facing him when you pressed (before the auto-turn) -> slightly better / worse blow
+        p.aimTurn = t ? Math.abs(angDiff(Math.atan2(t.pos.x - p.pos.x, t.pos.z - p.pos.z), p.facing)) : 0;
         // turn towards a target just out of reach (no step-in: out of reach is out of reach)
         if (t && p.dist(t) < p.meleeReach(t) + 1.3) p.faceTo(t.pos.x, t.pos.z, true);
       }
@@ -607,6 +610,8 @@ class Game {
   step(dt) {
     this.time += dt; this.lastDt = dt;
     const inp = this.input.poll();
+    // pause: Esc / Start / View, any time during a battle (Esc closes an open order selection first)
+    if (!SIM && !this.ended && inp.pause && !(this.orderMenu && inp.menuCancel && !inp.startBtn)) { this.setPaused(true); return; }
     for (const p of this.pending.filter((x) => x.at <= this.time)) p.fn();
     this.pending = this.pending.filter((x) => x.at > this.time);
     // endgame: few units left (or a long lull) -> everyone hunts, nobody flees (see ai.js)

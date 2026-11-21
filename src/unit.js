@@ -122,6 +122,13 @@ export class Unit {
     const r = this.s.bashRange + t.radius;
     return this.isPlayer ? Math.max(r, this.s.minRange + 0.05) : r;
   }
+  // the player's melee: squarely facing the enemy when you pressed -> a slightly better blow; swinging at someone
+  // off to the side or behind -> a weaker one. Tuned to average out (~2/3 of blows squared up = no net change).
+  aimMult() {
+    if (!this.isPlayer || this.type === "archer") return 1;
+    const a = this.aimTurn ?? 0;
+    return a < 0.6 ? 1.06 : a < 1.4 ? 0.94 : 0.82;
+  }
   canAttack(t) {
     if (!t || !t.alive || this.cooldown > 0 || this.attackTimer > 0) return false;
     const d = this.dist(t);
@@ -204,7 +211,7 @@ export class Unit {
       this.heavy = false;
       const t = this.pendingTarget; this.pendingTarget = null;
       if (!t || !t.alive || !this.alive || this.dist(t) > this.meleeReach(t) + 0.3) return;
-      const dmg = Math.round(rint(this.s.dmg) * (this.type === "captain" ? 2 * PLAYER_CAPTAIN_DMG : 1.6));   // soldiers: a milder heavy blow
+      const dmg = Math.round(rint(this.s.dmg) * (this.type === "captain" ? 2 * PLAYER_CAPTAIN_DMG : 1.6) * this.aimMult());   // soldiers: a milder heavy blow
       this.heavyHit = true; const dealt = this.game.applyHit(this, t, dmg); this.heavyHit = false;
       // knock the target back half a metre (if there is room)
       const dx = t.pos.x - this.pos.x, dz = t.pos.z - this.pos.z, d = Math.hypot(dx, dz) || 1;
@@ -223,7 +230,7 @@ export class Unit {
     const dmg = Math.round(rint(this.s.dmg) * (this.order?.charge ? 1.15 : 1));   // charging: harder blows
     // the player's quick swings: full damage at twice the rate, and the captain hits harder still - the hero should
     // feel like one, but a lone charge into a crowd still ends badly (they all hit back, and they hunt the player)
-    this.game.applyHit(this, t, this.quick ? Math.round(dmg * (this.type === "captain" ? PLAYER_CAPTAIN_DMG : 1)) : dmg);
+    this.game.applyHit(this, t, this.quick ? Math.round(dmg * (this.type === "captain" ? PLAYER_CAPTAIN_DMG : 1) * this.aimMult()) : dmg);
   }
   takeHit(attacker, dmg, ranged) {
     if (!this.alive) return 0;

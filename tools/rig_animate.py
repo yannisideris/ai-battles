@@ -301,6 +301,15 @@ _shoot = {
     1.0:  {BOW: (0, 0, 0), DRAW: (0, 0, 0), "chest": (0, 0, 0), "head": (0, 0, 0)},
 }
 _act = make_action("shoot", 1.0, _shoot, loop=False)
+# the original, softer shot: used when the archer has to swing round to shoot (to the side / behind) -
+# its gentler raise reads well together with the body turning
+make_action("shoot_turn", 1.0, {
+    0.0: {BOW: (0, 0, 0), DRAW: (0, 0, 0), "chest": (0, 0, 0)},
+    0.3: {BOW: (-85, 0, 0), DRAW: (-85, 0, 0), "chest": (0, 0, 30 * TW)},              # raise bow, nock
+    0.7: {BOW: (-90, 0, 0), DRAW: (-60, 0, -35 * TW), "chest": (0, 0, 35 * TW)},       # draw
+    0.75: {BOW: (-90, 0, 0), DRAW: (-75, 0, 10 * TW), "chest": (-4, 0, 30 * TW)},      # release
+    1.0: {BOW: (0, 0, 0), DRAW: (0, 0, 0), "chest": (0, 0, 0)},
+}, loop=False)
 set_interp(_act, 0.68, "LINEAR", 1.0)   # the release is a snap, not a glide
 make_action("hit", 0.35, {
     0.0: {"chest": (0, 0, 0), "head": (0, 0, 0), "hips": {"loc": (0, 0, 0)}},

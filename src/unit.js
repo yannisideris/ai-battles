@@ -6,9 +6,9 @@ export const HEAVY_CHARGE = 1.45;   // seconds in the raised stance before the h
 const PLAYER_CAPTAIN_DMG = 1.5;   // the player captain's sword (on top of full-damage quick swings)
 
 let nextId = 1;
-const ONE_SHOT = new Set(["attack", "attack2", "attack3", "shoot", "hit", "cheer", "idle_look", "idle_tap", "laugh", "rally"]);
+const ONE_SHOT = new Set(["attack", "attack2", "attack3", "shoot", "shoot_turn", "hit", "cheer", "idle_look", "idle_tap", "laugh", "rally"]);
 const CLAMP = new Set(["death", "death_fwd", "death_back", "block"]);
-const BUSY = new Set(["attack", "attack2", "attack3", "shoot", "hit", "laugh", "rally", "cheer"]);
+const BUSY = new Set(["attack", "attack2", "attack3", "shoot", "shoot_turn", "hit", "laugh", "rally", "cheer"]);
 const pick = (a) => a[Math.floor(Math.random() * a.length)];
 
 export class Unit {
@@ -133,6 +133,8 @@ export class Unit {
   }
   startAttack(t) {
     if (!this.canAttack(t)) return false;
+    // how far we have to swing round to face the target (decides the archer's shot animation)
+    const turn = Math.abs(angDiff(Math.atan2(t.pos.x - this.pos.x, t.pos.z - this.pos.z), this.facing));
     this.pendingTarget = t; this.attackTimer = this.s.windup; this.cooldown = this.s.cooldown * (0.9 + Math.random() * 0.2) / (this.type === "archer" ? (TEAM[this.team].archerRate ?? 1) : 1);
     // arcade feel for the player's melee: twice as many swings, half damage each -> same damage per second
     this.quick = this.isPlayer && this.type !== "archer";
@@ -142,7 +144,10 @@ export class Unit {
     this.quick = this.isPlayer && this.type !== "archer";
     this.bashing = this.type === "archer" && this.dist(t) <= this.bashReach(t);
     if (this.bashing) { this.attackTimer = 0.3; this.cooldown = this.s.bashCooldown; this.play(this.variant("attack", "attack3"), 0.08, 1.2); this.game.sfx("swing"); }
-    else if (this.type === "archer") { this.play("shoot", 0.1); this.game.sfx("draw"); this.cooldownMax = this.cooldown; }
+    else if (this.type === "archer") {
+      // target in front: the crisp, decisive shot; swinging round to the side / behind: the softer original one
+      this.play(turn > 1.05 && this.actions.shoot_turn ? "shoot_turn" : "shoot", 0.1); this.game.sfx("draw"); this.cooldownMax = this.cooldown;
+    }
     else {
       // the player's first swing after a pause is always the overhead chop: its opening IS the sword going up behind
       // the shoulder, so if the button turns out to be held, it flows straight into the heavy-blow stance.

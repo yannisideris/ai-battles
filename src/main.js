@@ -693,7 +693,9 @@ class Game {
   updateEdgeArrow() {
     const el = $("edge-arrow"), foes = this.alive(this.enemyOf(this.settings.side));
     if (!this.player.alive || this.ended || foes.length === 0 || foes.length > 3) { el.classList.add("hidden"); return; }
-    if (!this.trackFoe || !this.trackFoe.alive) this.trackFoe = foes.sort((a, b) => this.player.dist(a) - this.player.dist(b))[0];
+    // the arrow sticks to one enemy (no flicker between two), but switches when another one is clearly closer now
+    const closest = foes.sort((a, b) => this.player.dist(a) - this.player.dist(b))[0];
+    if (!this.trackFoe || !this.trackFoe.alive || this.player.dist(closest) < this.player.dist(this.trackFoe) - 1.5) this.trackFoe = closest;
     const p = this.trackFoe.pos.clone(); p.y = 0.8; p.project(this.camera);
     const sx = (p.x + 1) / 2 * innerWidth, sy = (1 - p.y) / 2 * innerHeight, m = 40;
     const onScreen = p.z < 1 && sx > m && sx < innerWidth - m && sy > m && sy < innerHeight - m;

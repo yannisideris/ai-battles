@@ -347,10 +347,8 @@ class Game {
 
   // ---------------------------------------------------------------- player
   camOffset() { return new THREE.Vector3(0, 11, this.settings.side === "human" ? 8.5 : -8.5); }
-  applyLunge(p, dir, step) {
-    p.lungeDir.copy(dir); p.lunge = 0.16;
-    if (this.world.walkable(p.pos.x + dir.x * step, p.pos.z + dir.z * step)) p.pos.addScaledVector(dir, step);
-  }
+  // (the player's swings no longer step or slide towards the target: you hit what is within sword's length)
+  applyLunge() {}
   playerControl(inp) {
     const p = this.player, v = new THREE.Vector3();
     if (!p.alive) return v;
@@ -399,7 +397,7 @@ class Game {
       const aimBest = () => {
         let best = null, bs = -1e9;
         for (const f of foes) {
-          const d = p.dist(f); if (d > p.s.range + f.radius + 1.4) continue;
+          const d = p.dist(f); if (d > p.meleeReach(f) + 1.4) continue;
           const ang = Math.abs(angDiff(Math.atan2(f.pos.x - p.pos.x, f.pos.z - p.pos.z), p.facing));
           const sc = -d - ang * 0.9; if (sc > bs) { bs = sc; best = f; }
         }
@@ -440,20 +438,13 @@ class Game {
         // aim assist: the closest enemy roughly in front of you within a short step
         let best = null, bs = -1e9;
         for (const f of foes) {
-          const d = p.dist(f); if (d > p.s.range + f.radius + 1.3) continue;
+          const d = p.dist(f); if (d > p.meleeReach(f) + 1.3) continue;
           const ang = Math.abs(angDiff(Math.atan2(f.pos.x - p.pos.x, f.pos.z - p.pos.z), p.facing));
           const s = -d - ang * 0.9 + (f === p.target ? 0.6 : 0); if (s > bs) { bs = s; best = f; }
         }
         if (best) { t = best; p.target = best; }
-        // lunge: close a small gap so the swing connects
-        if (t && p.dist(t) > p.s.range + t.radius - 0.1 && p.dist(t) < p.s.range + t.radius + 1.3) {
-          const dir = new THREE.Vector3(t.pos.x - p.pos.x, 0, t.pos.z - p.pos.z).normalize();
-          const step = Math.min(0.9, p.dist(t) - (p.s.range + t.radius - 0.2));                  // snap in, then swing
-          const fresh = p.type !== "archer" && this.time - (p.lastSwingT ?? -9) > 1.0;
-          p.faceTo(t.pos.x, t.pos.z, true);
-          if (fresh) { p.pendingLunge = { dir, step }; p.reachBonus = step + 0.1; }   // a fresh press might become a heavy blow: step in only once it is a tap
-          else this.applyLunge(p, dir, step);
-        }
+        // turn towards a target just out of reach (no step-in: out of reach is out of reach)
+        if (t && p.dist(t) < p.meleeReach(t) + 1.3) p.faceTo(t.pos.x, t.pos.z, true);
       }
       const started = p.startAttack(t); p.reachBonus = 0;
       if (started) this.attackBuffer = 0;
@@ -486,7 +477,7 @@ class Game {
   takeOver(dead) {
     dead.setPlayer(false);
     const mine = this.alive(dead.team);
-    const pool = mine.filter((x) => x.type === "soldier").length ? mine.filter((x) => x.type === "soldier") : mine.filter((x) => x.type === "archer");
+    const pool = mine.filter((x) => x.type === "soldier" || x.type === "archer");   // anyone, at random
     if (!pool.length || SPECTATE || this.muted) return;
     const next = pool[Math.floor(Math.random() * pool.length)];
     this.player = next; next.setPlayer(true); next.order = null; next.target = null;

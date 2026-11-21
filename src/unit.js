@@ -111,6 +111,11 @@ export class Unit {
   dist(o) { return Math.hypot(o.pos.x - this.pos.x, o.pos.z - this.pos.z); }
 
   // ----- combat
+  // sword reach, centre to centre. The player's own unit must really be at sword's length (~0.5 m between the
+  // bodies) - AI units keep their longer, balance-tested reach.
+  meleeReach(t) {
+    return this.isPlayer && this.type !== "archer" ? this.radius + t.radius + 0.55 : this.s.range + t.radius;
+  }
   canAttack(t) {
     if (!t || !t.alive || this.cooldown > 0 || this.attackTimer > 0) return false;
     const d = this.dist(t);
@@ -118,7 +123,7 @@ export class Unit {
       if (d <= this.s.bashRange + t.radius) return true;                       // too close to shoot: bash
       return d >= this.s.minRange && d <= this.s.range && this.game.world.lineClear(this.pos.x, this.pos.z, t.pos.x, t.pos.z);
     }
-    return d <= this.s.range + t.radius + (this.reachBonus || 0);   // reachBonus: the player's step-in still to come
+    return d <= this.meleeReach(t) + (this.reachBonus || 0);   // reachBonus: the player's step-in still to come
   }
   startAttack(t) {
     if (!this.canAttack(t)) return false;
@@ -180,14 +185,14 @@ export class Unit {
     this.heavy = true; this.quick = false; this.bashing = false;
     this.pendingTarget = t && t.alive ? t : null; this.attackTimer = 0.15; this.cooldown = 0.55;
     if (t) this.faceTo(t.pos.x, t.pos.z, true);
-    this.lungeDir.set(Math.sin(this.facing), 0, Math.cos(this.facing)); this.lunge = 0.2;   // step into it
+    // (no step into it: the blow lands on whoever is within sword's length)
     this.game.sfx("swing");
   }
   resolveAttack() {
     if (this.heavy) {
       this.heavy = false;
       const t = this.pendingTarget; this.pendingTarget = null;
-      if (!t || !t.alive || !this.alive || this.dist(t) > this.s.range + t.radius + 0.5) return;
+      if (!t || !t.alive || !this.alive || this.dist(t) > this.meleeReach(t) + 0.3) return;
       const dmg = Math.round(rint(this.s.dmg) * (this.type === "captain" ? 2 * PLAYER_CAPTAIN_DMG : 1.6));   // soldiers: a milder heavy blow
       this.heavyHit = true; const dealt = this.game.applyHit(this, t, dmg); this.heavyHit = false;
       // knock the target back half a metre (if there is room)
@@ -203,7 +208,7 @@ export class Unit {
       return;
     }
     if (this.type === "archer") { this.game.fireArrow(this, t); return; }
-    if (this.dist(t) > this.s.range + t.radius + 0.35 + (this.isPlayer ? 0.3 : 0)) return; // target stepped away
+    if (this.dist(t) > this.meleeReach(t) + (this.isPlayer ? 0.2 : 0.35)) return; // target stepped away
     const dmg = rint(this.s.dmg);
     // the player's quick swings: full damage at twice the rate, and the captain hits harder still - the hero should
     // feel like one, but a lone charge into a crowd still ends badly (they all hit back, and they hunt the player)
@@ -291,7 +296,7 @@ export class Unit {
     // the player keeps more mobility while swinging (arcade feel); AI units plant their feet
     const slow = this.charging ? 0.5 : this.attackTimer > 0 || this.busy() ? (this.isPlayer ? 0.55 : 0.25) : 1;
     const v = desired.clone().multiplyScalar(slow);
-    if (this.lunge > 0) { this.lunge -= dt; v.addScaledVector(this.lungeDir, 4.2); }   // short step into the swing
+
     // separation from other units
     for (const o of this.game.units) {
       if (o === this || !o.alive) continue;
@@ -302,6 +307,12 @@ export class Unit {
     const nx = this.pos.x + this.vel.x * dt, nz = this.pos.z + this.vel.z * dt, w = this.game.world, r = this.radius * 0.8;
     // move, then resolve against the real obstacle outlines (sliding along walls happens naturally)
     this.pos.x = nx; this.pos.z = nz;
+    // short step into the swing: applied straight to the position so it covers exactly the planned distance
+    if (this.lunge > 0) {
+      const k = Math.min(dt, this.lunge); this.lunge -= dt;
+      this.pos.addScaledVector(this.lungeDir, (this.lungeSpeed ?? 4.2) * k);
+      if (this.lunge <= 0) this.lungeSpeed = null;
+    }
     // hard collision: never stand inside another living unit (each side of a pair resolves half the overlap)
     for (const o of this.game.units) {
       if (o === this || !o.alive) continue;

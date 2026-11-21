@@ -384,7 +384,10 @@ export class Brain {
   }
 
   followPath(tx, tz, dt) {
-    const u = this.u, w = u.game.world;
+    const u = this.u, w = u.game.world, g = u.game;
+    // last-resort safety net: a long lull in the endgame -> head straight for the target and let the body
+    // collision slide us round whatever is in the way (no grid path that might be failing)
+    if (g.endgame && g.time - g.lastHitTime > 40) return norm(tx - u.pos.x, tz - u.pos.z);
     if (w.walkLineClear(u.pos.x, u.pos.z, tx, tz)) { this.path = null; return norm(tx - u.pos.x, tz - u.pos.z); }
     this.repath = (this.repath ?? 0) - dt;
     if (!this.path || this.repath <= 0 || Math.hypot(this.pathGoal[0] - tx, this.pathGoal[1] - tz) > 1.5) {

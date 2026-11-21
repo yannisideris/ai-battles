@@ -23,6 +23,8 @@ export class World {
   constructor(scene, quality, seed = (Math.random() * 1e9) | 0) {
     this.scene = scene; this.q = quality; this.rand = rng(seed);
     this.grid = new Uint8Array(GW * GH);
+    // exact obstacle outlines for body collision (the 1 m grid stays for path finding and arrow line-of-sight)
+    this.shapes = [];
     this.group = new THREE.Group(); scene.add(this.group);
     this.grad = toonGradient();
     this.mat = (c) => new THREE.MeshToonMaterial({ color: c, gradientMap: this.grad });
@@ -56,6 +58,31 @@ export class World {
       }
     }
     return [x, z];
+  }
+  // body collision against the real outlines (trunks, rocks, thin fences, house walls) + the map edge
+  collide(x, z, r) {
+    for (let pass = 0; pass < 2; pass++) {
+      for (const o of this.shapes) {
+        if (o.c) {
+          const dx = x - o.x, dz = z - o.z, d = Math.hypot(dx, dz), min = o.r + r;
+          if (d >= min) continue;
+          if (d > 1e-5) { x = o.x + dx / d * min; z = o.z + dz / d * min; } else x = o.x + min;
+        } else {
+          if (Math.abs(x - o.x) > o.hw + r || Math.abs(z - o.z) > o.hd + r) continue;
+          const qx = Math.max(o.x - o.hw, Math.min(x, o.x + o.hw)), qz = Math.max(o.z - o.hd, Math.min(z, o.z + o.hd));
+          const ox = x - qx, oz = z - qz, d = Math.hypot(ox, oz);
+          if (d >= r) continue;
+          if (d > 1e-5) { x += ox / d * (r - d); z += oz / d * (r - d); }
+          else {   // centre inside the box: leave by the nearest side
+            const ex = [o.x - o.hw - r - x, o.x + o.hw + r - x], ez = [o.z - o.hd - r - z, o.z + o.hd + r - z];
+            const bx = Math.abs(ex[0]) < Math.abs(ex[1]) ? ex[0] : ex[1], bz = Math.abs(ez[0]) < Math.abs(ez[1]) ? ez[0] : ez[1];
+            if (Math.abs(bx) < Math.abs(bz)) x += bx; else z += bz;
+          }
+        }
+      }
+    }
+    const lx = MAP_W / 2 - CELL - r, lz = MAP_H / 2 - CELL - r;   // the border cells are solid
+    return [Math.max(-lx, Math.min(lx, x)), Math.max(-lz, Math.min(lz, z))];
   }
   blocksArrow(x, z) { const [cx, cz] = this.toCell(x, z); return this.get(cx, cz) === BLOCK; }
   markRect(x0, z0, x1, z1, v) {
@@ -205,6 +232,7 @@ export class World {
     for (const m of [walls, roof, beams, door, chim]) { m.castShadow = this.q.shadows; m.receiveShadow = true; g.add(m); }
     this.group.add(g);
     this.markRect(x - w / 2 + 0.05, z - d / 2 + 0.05, x + w / 2 - 0.05, z + d / 2 - 0.05, BLOCK);
+    this.shapes.push({ x, z, hw: w / 2 + 0.03, hd: d / 2 + 0.03 });
     this.houses.push({ x, z, w, d });
   }
   addFence(x, z, len, horiz) {
@@ -219,6 +247,7 @@ export class World {
     }
     this.group.add(g);
     this.markRect(x, z, horiz ? x + len : x, horiz ? z : z + len, FENCE);
+    this.shapes.push(horiz ? { x: x + len / 2, z, hw: len / 2 + 0.07, hd: 0.07 } : { x, z: z + len / 2, hw: 0.07, hd: len / 2 + 0.07 });
   }
   addTree(x, z) {
     const g = new THREE.Group(); g.position.set(x, 0, z);
@@ -234,6 +263,7 @@ export class World {
     g.traverse((o) => { if (o.isMesh) { o.castShadow = this.q.shadows; o.receiveShadow = true; } });
     this.group.add(g);
     this.markRect(x - 0.2, z - 0.2, x + 0.2, z + 0.2, BLOCK);
+    this.shapes.push({ c: true, x, z, r: 0.2 * s });   // the trunk (leaves are above head height)
   }
   addRock(x, z) {
     const s = 0.35 + this.rand() * 0.3;
@@ -241,5 +271,6 @@ export class World {
     m.position.set(x, s * 0.5, z); m.scale.y = 0.6; m.rotation.y = this.rand() * 6;
     m.castShadow = this.q.shadows; m.receiveShadow = true; this.group.add(m);
     this.markRect(x - s * 0.5, z - s * 0.5, x + s * 0.5, z + s * 0.5, BLOCK);
+    this.shapes.push({ c: true, x, z, r: s * 0.8 });
   }
 }

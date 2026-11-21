@@ -300,9 +300,8 @@ export class Unit {
     }
     this.vel.lerp(v, Math.min(1, dt * (this.isPlayer ? 20 : 10)));   // snappier control for the player
     const nx = this.pos.x + this.vel.x * dt, nz = this.pos.z + this.vel.z * dt, w = this.game.world, r = this.radius * 0.8;
-    const okX = w.walkable(nx + Math.sign(this.vel.x) * r, this.pos.z), okZ = w.walkable(this.pos.x, nz + Math.sign(this.vel.z) * r);
-    if (okX) this.pos.x = nx; else this.vel.x = 0;
-    if (okZ) this.pos.z = nz; else this.vel.z = 0;
+    // move, then resolve against the real obstacle outlines (sliding along walls happens naturally)
+    this.pos.x = nx; this.pos.z = nz;
     // hard collision: never stand inside another living unit (each side of a pair resolves half the overlap)
     for (const o of this.game.units) {
       if (o === this || !o.alive) continue;
@@ -311,11 +310,11 @@ export class Unit {
         const ux = d > 1e-4 ? dx / d : Math.cos(this.id.length), uz = d > 1e-4 ? dz / d : Math.sin(this.id.length);
         const push = (min - d) * (o.team === this.team ? 0.5 : 0.65);
         const px = this.pos.x + ux * push, pz = this.pos.z + uz * push;
-        if (w.walkable(px, pz)) { this.pos.x = px; this.pos.z = pz; }
+        this.pos.x = px; this.pos.z = pz;   // (walls are resolved right below)
       }
     }
-    // solid walls: the whole body (radius + shield/shoulders margin) stays out of houses, trees, fences and rocks
-    [this.pos.x, this.pos.z] = w.pushOut(this.pos.x, this.pos.z, this.radius + 0.14);
+    // solid obstacles: the body (radius + a small margin for shield / shoulders) stays out of their real outlines
+    [this.pos.x, this.pos.z] = w.collide(this.pos.x, this.pos.z, this.radius + 0.06);
     const speed = Math.hypot(this.vel.x, this.vel.z);
     if (speed > 0.3 && !(this.attackTimer > 0) && !(this.type === "archer" && !this.isPlayer && this.busy())) this.wantFacing = Math.atan2(this.vel.x, this.vel.z);
     if (this.wantFacing !== undefined) this.facing += angDiff(this.wantFacing, this.facing) * Math.min(1, dt * (this.isPlayer ? 18 : 10));
@@ -338,18 +337,21 @@ export class Unit {
     // reload ring: the player's archer only (the heavy sword blow has no ring - you hear when it is ready)
     if (this.isPlayer && this.type === "archer") this.updateReloadRing(this.cooldown > 0 && this.cooldownMax ? Math.min(1, 1 - this.cooldown / this.cooldownMax) : 1);
     // hp bar faces camera, flash on hit
-    const f = this.hpFrac(); this.hpBar.children[1].scale.x = Math.max(0.001, f); this.hpBar.children[1].position.x = -(1 - f) * 0.3;
-    this.hpBar.children[1].material.color.setHSL(f * 0.33, 0.85, 0.5);
+    const f = this.hpFrac(), fill = this.hpBar.userData.fill;
+    fill.scale.x = Math.max(0.001, f); fill.position.x = -(1 - f) * 0.31;
     this.hpBar.quaternion.copy(this.game.camera.quaternion).premultiply(this.root.quaternion.clone().invert());
   }
 }
 
 function makeBar() {
   const g = new THREE.Group();
-  const bg = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.08), new THREE.MeshBasicMaterial({ color: 0x111111, depthTest: false, transparent: true, opacity: 0.8 }));
-  const fg = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.06), new THREE.MeshBasicMaterial({ color: 0x2ecc71, depthTest: false }));
-  fg.position.z = 0.001; bg.renderOrder = 10; fg.renderOrder = 11;
-  g.add(bg, fg); return g;
+  // health left = deep muted green (always the same colour); the lost part = very dark brown.
+  // (all three opaque: a transparent outline is drawn last and would darken the bar on top of it)
+  const edge = new THREE.Mesh(new THREE.PlaneGeometry(0.66, 0.11), new THREE.MeshBasicMaterial({ color: 0x0c0c0c, depthTest: false, toneMapped: false }));
+  const bg = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.075), new THREE.MeshBasicMaterial({ color: 0x3a2414, depthTest: false, toneMapped: false }));
+  const fg = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.075), new THREE.MeshBasicMaterial({ color: 0x2f6e3a, depthTest: false, toneMapped: false }));
+  bg.position.z = 0.001; fg.position.z = 0.002; edge.renderOrder = 10; bg.renderOrder = 11; fg.renderOrder = 12;
+  g.add(edge, bg, fg); g.userData.fill = fg; return g;
 }
 export function rint([a, b]) { return a + Math.floor(Math.random() * (b - a + 1)); }
 export function angDiff(a, b) { let d = a - b; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return d; }

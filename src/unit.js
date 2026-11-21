@@ -116,11 +116,17 @@ export class Unit {
   meleeReach(t) {
     return this.isPlayer && this.type !== "archer" ? this.radius + t.radius + 0.55 : this.s.range + t.radius;
   }
+  // archer's bow-bash reach. The player's archer has no dead zone: anything too close to shoot gets bashed
+  // (AI archers keep their tested reach)
+  bashReach(t) {
+    const r = this.s.bashRange + t.radius;
+    return this.isPlayer ? Math.max(r, this.s.minRange + 0.05) : r;
+  }
   canAttack(t) {
     if (!t || !t.alive || this.cooldown > 0 || this.attackTimer > 0) return false;
     const d = this.dist(t);
     if (this.type === "archer") {
-      if (d <= this.s.bashRange + t.radius) return true;                       // too close to shoot: bash
+      if (d <= this.bashReach(t)) return true;                                 // too close to shoot: bash
       return d >= this.s.minRange && d <= this.s.range && this.game.world.lineClear(this.pos.x, this.pos.z, t.pos.x, t.pos.z);
     }
     return d <= this.meleeReach(t) + (this.reachBonus || 0);   // reachBonus: the player's step-in still to come
@@ -134,7 +140,7 @@ export class Unit {
     // the player's archer turns round to the target quickly but visibly (you see him spin and draw); everyone else snaps
     this.faceTo(t.pos.x, t.pos.z, !(this.isPlayer && this.type === "archer"));
     this.quick = this.isPlayer && this.type !== "archer";
-    this.bashing = this.type === "archer" && this.dist(t) <= this.s.bashRange + t.radius;
+    this.bashing = this.type === "archer" && this.dist(t) <= this.bashReach(t);
     if (this.bashing) { this.attackTimer = 0.3; this.cooldown = this.s.bashCooldown; this.play(this.variant("attack", "attack3"), 0.08, 1.2); this.game.sfx("swing"); }
     else if (this.type === "archer") { this.play("shoot", 0.1); this.game.sfx("draw"); this.cooldownMax = this.cooldown; }
     else {
@@ -204,7 +210,7 @@ export class Unit {
     const t = this.pendingTarget; this.pendingTarget = null;
     if (!t || !t.alive || !this.alive) return;
     if (this.bashing) {
-      if (this.dist(t) <= this.s.bashRange + t.radius + 0.35) this.game.applyHit(this, t, rint(this.s.bashDmg));
+      if (this.dist(t) <= this.bashReach(t) + 0.35) this.game.applyHit(this, t, rint(this.s.bashDmg));
       return;
     }
     if (this.type === "archer") { this.game.fireArrow(this, t); return; }

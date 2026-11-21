@@ -456,7 +456,12 @@ class Game {
     else this.attackBuffer = Math.max(0, (this.attackBuffer || 0) - this.lastDt);
     if (this.attackBuffer > 0 && p.cooldown <= 0 && p.attackTimer <= 0) {
       let t = p.target;
-      if (p.type !== "archer" || (t && p.dist(t) <= p.s.bashRange + t.radius)) {
+      // archer: someone breathing down your neck (too close to shoot) -> turn round and smack him with the bow
+      if (p.type === "archer") {
+        const close = foes.filter((f) => p.dist(f) <= p.bashReach(f)).sort((a, b) => p.dist(a) - p.dist(b))[0];
+        if (close) { t = close; p.target = close; }
+      }
+      if (p.type !== "archer") {
         // aim assist: the closest enemy roughly in front of you within a short step
         let best = null, bs = -1e9;
         for (const f of foes) {

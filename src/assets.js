@@ -54,6 +54,60 @@ function toToon(root, outline) {
   for (const [parent, hull, src] of extra) { hull.position.copy(src.position); hull.quaternion.copy(src.quaternion); hull.scale.copy(src.scale); parent.add(hull); }
 }
 
+// The new skeleton models (Pixal3D) came out darker and more saturated in the cloth than the three original ones
+// (deep magenta instead of pink). Measured on the textures: originals ~ hue 338, saturation 0.69, value 0.64.
+// This pulls only the pink/magenta/red cloth pixels of a model towards those numbers (bone, metal, wood untouched).
+const SKEL_TARGET = { hue: 338, sat: 0.69, val: 0.64 };
+const SKEL_ORIGINALS = ["captain", "soldier", "archer"];
+function rgb2hsv(r, g, b) {
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  let h = 0; if (d) { h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; h *= 60; if (h < 0) h += 360; }
+  return [h, mx ? d / mx : 0, mx];
+}
+function hsv2rgb(h, s, v) {
+  const c = v * s, x = c * (1 - Math.abs(((h / 60) % 2) - 1)), m = v - c;
+  const [r, g, b] = h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x] : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+  return [r + m, g + m, b + m];
+}
+const hueDist = (a, b) => { const d = Math.abs(a - b) % 360; return d > 180 ? 360 - d : d; };
+function clothWeight(h, s, v) {   // 0..1: how much this pixel is "team cloth"
+  const sw = Math.min(1, Math.max(0, (s - 0.25) / 0.15)), vw = Math.min(1, Math.max(0, (v - 0.1) / 0.1));
+  const hw = Math.min(1, Math.max(0, (60 - hueDist(h, 335)) / 15));   // within ~45 deg of magenta, soft edge
+  return sw * vw * hw;
+}
+function softenSkeletonCloth(root) {
+  root.traverse((o) => {
+    const map = o.isMesh && o.material?.map; if (!map?.image || map.userData.softened) return;
+    const img = map.image, W = img.width, H = img.height;
+    const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+    const cx = cv.getContext("2d", { willReadFrequently: true }); cx.drawImage(img, 0, 0);
+    const id = cx.getImageData(0, 0, W, H), d = id.data;
+    // this model's own cloth average (weighted)
+    let n = 0, hs = 0, hc = 0, S = 0, V = 0;
+    for (let i = 0; i < d.length; i += 16) {
+      const [h, s, v] = rgb2hsv(d[i] / 255, d[i + 1] / 255, d[i + 2] / 255), w = clothWeight(h, s, v); if (!w) continue;
+      n += w; hs += w * Math.sin(h * Math.PI / 180); hc += w * Math.cos(h * Math.PI / 180); S += w * s; V += w * v;
+    }
+    if (n < 50) return;
+    let mh = Math.atan2(hs, hc) * 180 / Math.PI; if (mh < 0) mh += 360;
+    const sK = SKEL_TARGET.sat / (S / n), vK = SKEL_TARGET.val / (V / n);
+    let dh = SKEL_TARGET.hue - mh; if (dh > 180) dh -= 360; if (dh < -180) dh += 360;
+    for (let i = 0; i < d.length; i += 4) {
+      const r = d[i] / 255, g = d[i + 1] / 255, b = d[i + 2] / 255, [h, s, v] = rgb2hsv(r, g, b), w = clothWeight(h, s, v);
+      if (!w) continue;
+      const [nr, ng, nb] = hsv2rgb((h + dh * 0.6 + 360) % 360, Math.min(1, s * sK), Math.min(1, v * vK));
+      d[i] = 255 * (r + (nr - r) * w); d[i + 1] = 255 * (g + (ng - g) * w); d[i + 2] = 255 * (b + (nb - b) * w);
+    }
+    cx.putImageData(id, 0, 0);
+    const tex = new THREE.CanvasTexture(cv);
+    for (const k of ["flipY", "wrapS", "wrapT", "colorSpace", "channel", "minFilter", "magFilter"]) tex[k] = map[k];
+    tex.userData.softened = true; tex.needsUpdate = true;
+    o.material.map = tex;
+  });
+}
+// ?skelcolor=raw shows the models exactly as they came out of Pixal3D (for comparison)
+const SOFTEN = new URLSearchParams(location.search).get("skelcolor") !== "raw";
+
 async function loadOne(url) {
   try { return await loader.loadAsync(url); } catch { return null; }
 }
@@ -74,6 +128,7 @@ export async function loadUnitModels(quality, needed = null, onProgress = () => 
     const swap = new URLSearchParams(location.search).get(`preview_${team}_${type}`);
     const gltf = await loadOne(swap ? `assets/models/${swap.replace(/[^\w-]/g, "")}.glb` : MODEL_FILES[team][type]);
     templates[team] ??= {};
+    if (gltf && SOFTEN && team === "skeleton" && !SKEL_ORIGINALS.includes(type) && !swap) softenSkeletonCloth(gltf.scene);
     if (gltf) { toToon(gltf.scene, quality.outline); templates[team][type] = { scene: gltf.scene, clips: gltf.animations }; }
     onProgress(++done / entries.length);
   }));

@@ -89,7 +89,7 @@ function quantileMap(sorted, target) {
     return target[i] + (target[i + 1] - target[i]) * f;
   };
 }
-function softenSkeletonCloth(root) {
+function softenSkeletonCloth(root, k = 1) {   // k: 0 = untouched .. 1 = full match
   root.traverse((o) => {
     const map = o.isMesh && o.material?.map; if (!map?.image || map.userData.softened) return;
     const img = map.image, W = img.width, H = img.height;
@@ -107,7 +107,7 @@ function softenSkeletonCloth(root) {
     const mapS = quantileMap(S, SKEL_TARGET.S), mapV = quantileMap(V, SKEL_TARGET.V);
     for (let i = 0; i < d.length; i += 4) {
       const r = d[i] / 255, g = d[i + 1] / 255, b = d[i + 2] / 255, [h, s, v] = rgb2hsv(r, g, b);
-      const w = clothWeight(h, s, v, v - Math.min(r, g, b)); if (!w) continue;
+      const w = k * clothWeight(h, s, v, v - Math.min(r, g, b)); if (!w) continue;
       let dh = SKEL_TARGET.hue - h; if (dh > 180) dh -= 360; if (dh < -180) dh += 360;
       const [nr, ng, nb] = hsv2rgb((h + dh * 0.3 + 360) % 360, mapS(s), mapV(v));
       d[i] = 255 * (r + (nr - r) * w); d[i + 1] = 255 * (g + (ng - g) * w); d[i + 2] = 255 * (b + (nb - b) * w);
@@ -122,6 +122,9 @@ function softenSkeletonCloth(root) {
 // Off by default: side by side, the user preferred the models' own deeper colours (more depth in the cloth).
 // ?skelcolor=soft turns the correction on (kept for comparison).
 const SOFTEN = new URLSearchParams(location.search).get("skelcolor") === "soft";
+// Per-model exception: the coffin-shield bearer reads too deep next to the rest, so only it gets a partial correction.
+// ?shieldsoft=0..1 overrides the strength (for comparing).
+const SOFTEN_ONLY = { shieldbearer: Number(new URLSearchParams(location.search).get("shieldsoft") ?? 0.5) };
 
 async function loadOne(url) {
   try { return await loader.loadAsync(url); } catch { return null; }
@@ -143,7 +146,10 @@ export async function loadUnitModels(quality, needed = null, onProgress = () => 
     const swap = new URLSearchParams(location.search).get(`preview_${team}_${type}`);
     const gltf = await loadOne(swap ? `assets/models/${swap.replace(/[^\w-]/g, "")}.glb` : MODEL_FILES[team][type]);
     templates[team] ??= {};
-    if (gltf && SOFTEN && team === "skeleton" && !SKEL_ORIGINALS.includes(type) && !swap) softenSkeletonCloth(gltf.scene);
+    if (gltf && team === "skeleton" && !SKEL_ORIGINALS.includes(type) && !swap) {
+      const k = SOFTEN ? 1 : SOFTEN_ONLY[type] || 0;
+      if (k > 0) softenSkeletonCloth(gltf.scene, Math.min(1, k));
+    }
     if (gltf) { toToon(gltf.scene, quality.outline); templates[team][type] = { scene: gltf.scene, clips: gltf.animations }; }
     onProgress(++done / entries.length);
   }));

@@ -112,11 +112,12 @@ if LONG:
     tip = [c.copy() for c in _side if c.z > _ztop - 0.06]
     t = sum(tip, Vector()) / max(1, len(tip))
     # the boots are on the inner side (towards x=0): keep the butt search narrow in x so they don't skew the line
-    butt = [v.co.copy() for v in me.vertices if v.co.z < 0.15 and abs(v.co.x - t.x) < 0.08]
+    butt = [v.co.copy() for v in me.vertices if v.co.z < 0.15 and abs(v.co.x - t.x) < 0.05] or \
+           [v.co.copy() for v in me.vertices if v.co.z < 0.15 and abs(v.co.x - t.x) < 0.08]   # narrow first: skip the boot
     if butt:   # the butt = the lowest end under the tip (a staff may slant back in depth, so no y window)
         _zb = min(c.z for c in butt); butt = [c for c in butt if c.z < _zb + 0.05]
     if tip and butt:
-        b = sum(butt, Vector()) / len(butt); axis = (t - b).normalized()
+        b = sum(butt, Vector()) / len(butt); axis = (t - b).normalized(); print("SPEAR_RAW tip", tuple(round(c, 3) for c in t), "butt", tuple(round(c, 3) for c in b))
         for _ in range(2):   # refine: re-fit the line on shaft vertices near both ends
             def dl(co): p = co - b; return (p - axis * p.dot(axis)).length
             lo = [v.co.copy() for v in me.vertices if v.co.z < 0.3 and dl(v.co) < 0.03]

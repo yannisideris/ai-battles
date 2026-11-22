@@ -58,9 +58,16 @@ async function loadOne(url) {
   try { return await loader.loadAsync(url); } catch { return null; }
 }
 
-export async function loadUnitModels(quality, onProgress = () => {}) {
+// loads the models of the given [team, type] pairs (default: everything) once; later calls reuse them
+let loadedOutline = null;
+export async function loadUnitModels(quality, needed = null, onProgress = () => {}) {
+  if (loadedOutline !== quality.outline) { for (const k of Object.keys(templates)) delete templates[k]; loadedOutline = quality.outline; }
   const entries = [];
-  for (const team of Object.keys(MODEL_FILES)) for (const type of Object.keys(MODEL_FILES[team])) entries.push([team, type]);
+  for (const team of Object.keys(MODEL_FILES)) for (const type of Object.keys(MODEL_FILES[team])) {
+    if (needed && !needed.some(([a, b]) => a === team && b === type)) continue;
+    if (templates[team]?.[type] && !templates[team][type].fallback) continue;
+    entries.push([team, type]);
+  }
   let done = 0;
   await Promise.all(entries.map(async ([team, type]) => {
     // dev preview of new art: ?preview_human_soldier=human_spearman swaps in assets/models/human_spearman.glb
@@ -72,10 +79,11 @@ export async function loadUnitModels(quality, onProgress = () => {}) {
   }));
   // fall back to any loaded model of the same team (or any team) while art is missing
   const any = Object.values(templates).flatMap((t) => Object.values(t))[0];
-  for (const [team, type] of entries) {
-    if (!templates[team][type]) templates[team][type] = Object.values(templates[team])[0] || any;
-  }
   if (!any) throw new Error("No unit models could be loaded");
+  for (const [team, type] of entries) {
+    templates[team] ??= {};
+    if (!templates[team][type]) templates[team][type] = { ...(Object.values(templates[team])[0] || any), fallback: true };
+  }
 }
 
 export function spawnModel(team, type) {

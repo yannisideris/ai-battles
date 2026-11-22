@@ -5,7 +5,7 @@ import { MAP_W, MAP_H } from "./config.js";
 export const CELL = 1;                       // nav grid cell size
 const GW = MAP_W / CELL, GH = MAP_H / CELL;
 // cell flags
-export const FREE = 0, BLOCK = 1, FENCE = 2;  // BLOCK stops movement + arrows, FENCE stops movement only
+export const FREE = 0, BLOCK = 1, FENCE = 2, WATER = 3;  // BLOCK stops movement + arrows, FENCE/WATER stop movement only (no hopping over water)
 
 function rng(seed) { // mulberry32
   return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
@@ -20,8 +20,8 @@ export function toonGradient() {
 }
 
 export class World {
-  constructor(scene, quality, seed = (Math.random() * 1e9) | 0) {
-    this.scene = scene; this.q = quality; this.rand = rng(seed);
+  constructor(scene, quality, seed = (Math.random() * 1e9) | 0, terrain = "village") {
+    this.scene = scene; this.q = quality; this.rand = rng(seed); this.terrain = terrain;
     this.grid = new Uint8Array(GW * GH);
     // exact obstacle outlines for body collision (the 1 m grid stays for path finding and arrow line-of-sight)
     this.shapes = [];
@@ -29,7 +29,8 @@ export class World {
     this.grad = toonGradient();
     this.mat = (c) => new THREE.MeshToonMaterial({ color: c, gradientMap: this.grad });
     this.buildGround();
-    this.buildVillage();
+    if (terrain === "village") this.buildVillage();
+    else if (terrain !== "empty") this.buildTerrain(terrain);
   }
 
   // ---------- grid helpers
@@ -217,6 +218,68 @@ export class World {
     }
   }
 
+  // campaign battlefields (the skirmish always uses the village)
+  //  forest: thick woods, few clear shots · river: water across the middle, two bridges (a narrow crossing)
+  //  open: open fields (archers' ground) · graveyard: rows of graves, dusk · ruins: broken walls for cover
+  buildTerrain(kind) {
+    const r = this.rand, zMin = -MAP_H / 2 + 9, zMax = MAP_H / 2 - 9;
+    this.houses = [];
+    const trees = (clusters, size) => {
+      for (let c = 0; c < clusters; c++) {
+        const cx = (r() - 0.5) * (MAP_W - 6), cz = zMin + r() * (zMax - zMin);
+        const n = 2 + Math.floor(r() * size);
+        for (let i = 0; i < n; i++) {
+          const x = cx + (r() - 0.5) * 6, z = cz + (r() - 0.5) * 6;
+          if (this.areaFree(x - 0.4, z - 0.4, x + 0.4, z + 0.4)) this.addTree(x, z);
+        }
+      }
+    };
+    const rocks = (n) => { for (let i = 0; i < n; i++) { const x = (r() - 0.5) * (MAP_W - 4), z = (r() - 0.5) * (MAP_H - 20); if (this.areaFree(x - 0.4, z - 0.4, x + 0.4, z + 0.4)) this.addRock(x, z); } };
+    if (kind === "forest") { trees(22, 7); rocks(6); }
+    else if (kind === "open") { trees(2, 2); rocks(5); }
+    else if (kind === "river") {
+      const b1 = -12 + r() * 8, b2 = 4 + r() * 8;   // two bridges
+      const water = new THREE.Mesh(new THREE.PlaneGeometry(MAP_W + 30, 3.4), new THREE.MeshToonMaterial({ color: 0x3f86b8, gradientMap: this.grad }));
+      water.rotation.x = -Math.PI / 2; water.position.set(0, 0.02, 0); this.group.add(water);
+      for (const bx of [b1, b2]) {
+        const deck = new THREE.Mesh(new THREE.BoxGeometry(3, 0.12, 4.2), this.mat(0x8b5a2b)); deck.position.set(bx, 0.07, 0); deck.receiveShadow = true; this.group.add(deck);
+        for (const s of [-1, 1]) { const rail = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.45, 4.2), this.mat(0x6b4426)); rail.position.set(bx + s * 1.5, 0.3, 0); rail.castShadow = this.q.shadows; this.group.add(rail); }
+      }
+      for (let cx = 1; cx < GW - 1; cx++) {
+        const [x] = this.cellCenter(cx, 0);
+        if (Math.abs(x - b1) < 1.4 || Math.abs(x - b2) < 1.4) continue;
+        for (const z of [-1.2, -0.3, 0.6, 1.4]) { const [, cz] = this.toCell(x, z); this.set(cx, cz, WATER); }
+      }
+      // water stops bodies (not arrows): one long box per stretch between the bridges
+      const lo = Math.min(b1, b2), hi = Math.max(b1, b2), edges = [[-MAP_W / 2, lo - 1.5], [lo + 1.5, hi - 1.5], [hi + 1.5, MAP_W / 2]];
+      for (const [a, b] of edges) if (b > a) this.shapes.push({ x: (a + b) / 2, z: 0, hw: (b - a) / 2, hd: 1.6 });
+      trees(8, 4); rocks(5);
+    } else if (kind === "graveyard") {
+      const m = this.mat(0x9a9aa2), dark = this.mat(0x6e6a64);
+      for (let gx = -4; gx <= 4; gx++) for (let gz = -3; gz <= 3; gz++) {
+        if (r() < 0.35) continue;
+        const x = gx * 2.6 + (r() - 0.5) * 0.6, z = gz * 3.2 + (r() - 0.5) * 0.6;
+        if (!this.areaFree(x - 0.3, z - 0.2, x + 0.3, z + 0.2)) continue;
+        const stone = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.7 + r() * 0.3, 0.16), r() < 0.5 ? m : dark);
+        stone.position.set(x, 0.38, z); stone.rotation.y = (r() - 0.5) * 0.3; stone.castShadow = this.q.shadows; this.group.add(stone);
+        this.markRect(x - 0.25, z - 0.05, x + 0.25, z + 0.05, FENCE);   // knee-high: stops bodies, not arrows
+        this.shapes.push({ x, z, hw: 0.3, hd: 0.1 });
+      }
+      trees(4, 2); rocks(4);
+    } else if (kind === "ruins") {
+      for (let i = 0, tries = 0; i < 12 && tries < 300; tries++) {
+        const horiz = r() < 0.5, len = 2 + Math.floor(r() * 4), x = (r() - 0.5) * (MAP_W - 10), z = zMin + 2 + r() * (zMax - zMin - 4);
+        const w = horiz ? len : 0.6, d = horiz ? 0.6 : len;
+        if (!this.areaFree(x - w / 2 - 1, z - d / 2 - 1, x + w / 2 + 1, z + d / 2 + 1)) continue;
+        const h = 0.9 + r() * 1.0;
+        const wall = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), this.mat(0xb3aa98)); wall.position.set(x, h / 2, z);
+        wall.castShadow = this.q.shadows; wall.receiveShadow = true; this.group.add(wall);
+        this.markRect(x - w / 2 + 0.05, z - d / 2 + 0.05, x + w / 2 - 0.05, z + d / 2 - 0.05, BLOCK);
+        this.shapes.push({ x, z, hw: w / 2 + 0.03, hd: d / 2 + 0.03 }); i++;
+      }
+      trees(5, 3); rocks(10);
+    }
+  }
   addHouse(x, z, w, d, rot) {
     if (rot) [w, d] = [d, w];
     const g = new THREE.Group(); g.position.set(x, 0, z);

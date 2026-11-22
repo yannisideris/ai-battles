@@ -21,7 +21,6 @@ export const ORDERS = [
 ];
 
 const ANCHOR_SPEED = 1.7;      // formation march speed (units are faster, so they can keep their slots)
-const ENGAGE_R = { soldier: 5.5, captain: 3.0 };   // captains let the line take the first blow
 
 export class General {
   constructor(game, team) {
@@ -57,7 +56,7 @@ export class General {
   moveAnchor(dt, mine, foes) {
     const g = this.game, { dir } = this.axes();
     // a player captain IS the anchor: the army forms up around them
-    const pc = mine.find((u) => u.isPlayer && u.type === "captain");
+    const pc = mine.find((u) => u.isPlayer && u.captain);
     if (pc) { this.anchor.x = pc.pos.x + dir.x * 1.6; this.anchor.z = pc.pos.z + dir.y * 1.6; return; }
     const front = foes.length ? Math.min(...foes.map((f) => Math.hypot(f.pos.x - this.anchor.x, f.pos.z - this.anchor.z))) : 99;
     let v = 0;
@@ -73,8 +72,8 @@ export class General {
 
   computeSlots(mine) {
     const { dir, right } = this.axes(), w = this.game.world;
-    const soldiers = mine.filter((u) => u.type === "soldier" && !this.flankers.has(u));
-    const archers = mine.filter((u) => u.type === "archer");
+    const soldiers = mine.filter((u) => u.line && !this.flankers.has(u));
+    const archers = mine.filter((u) => !u.captain && !u.line);   // back line: archers, mages, support
     // stable ordering: sort by position along the right-hand axis once, then keep it
     const along = (u) => (u.pos.x - this.anchor.x) * right.x + (u.pos.z - this.anchor.z) * right.y;
     if (!this.order || this.order.some((u) => !u.alive) || this.order.length !== soldiers.length + archers.length) {
@@ -85,24 +84,24 @@ export class General {
       if (!w.walkable(x, z)) { const [cx, cz] = w.toCell(x, z), n = w.nearestFree(cx, cz); if (n) [x, z] = w.cellCenter(...n); }
       this.slots.set(u, { x, z });
     };
-    const sol = this.order.filter((u) => u.type === "soldier"), arc = this.order.filter((u) => u.type === "archer");
-    sol.forEach((u, i) => place(u, (i - (sol.length - 1) / 2) * 1.35, 0));
+    const sol = this.order.filter((u) => u.line), arc = this.order.filter((u) => !u.line);
+    sol.forEach((u, i) => place(u, (i - (sol.length - 1) / 2) * 1.35 * (sol.length > 8 ? 0.9 : 1), 0));
     arc.forEach((u, i) => place(u, (i - (arc.length - 1) / 2) * 1.7, 3.2));
-    const cap = mine.find((u) => u.type === "captain");
-    if (cap) place(cap, 0, 1.6);
+    const cap = mine.find((u) => u.captain);
+    if (cap) place(cap, 0, cap.ranged ? 2.6 : 1.6);
   }
 
   decide(mine, foes) {
     if (!foes.length) return;
-    const power = (us) => us.reduce((s, u) => s + u.hp * (u.type === "archer" ? 1.2 : 1) * (0.5 + u.morale / 200), 0);
+    const power = (us) => us.reduce((s, u) => s + u.hp * (u.ranged ? 1.2 : 1) * (0.5 + u.morale / 200), 0);
     const ratio = power(mine) / Math.max(1, power(foes));
-    const captain = mine.find((u) => u.type === "captain");
+    const captain = mine.find((u) => u.captain);
     const avgMorale = mine.reduce((s, u) => s + u.morale, 0) / mine.length;
     // focus the weakest valuable enemy that many of us can reach
     let best = null, bestScore = -1e9;
     for (const f of foes) {
       const near = mine.filter((u) => u.dist(f) < 9).length;
-      const score = (1 - f.hpFrac()) * 6 + (f.type === "captain" ? 4 : f.type === "archer" ? 2 : 0) + near * 0.8 - centroidDist(mine, f) * 0.15;
+      const score = (1 - f.hpFrac()) * 6 + (f.captain ? 4 : f.ranged || f.type === "support" ? 2 : 0) + near * 0.8 - centroidDist(mine, f) * 0.15;
       if (score > bestScore) { bestScore = score; best = f; }
     }
     const plan = { focus: best ? best.id : null, flank: null, protect: false };
@@ -124,7 +123,7 @@ export class General {
     if (plan.flank) {
       for (const u of [...this.flankers]) if (!u.alive) this.flankers.delete(u);
       if (this.flankers.size < 2) {
-        const sol = (this.order || []).filter((u) => u.type === "soldier" && u.alive && !u.isPlayer);
+        const sol = (this.order || []).filter((u) => u.line && u.type !== "monster" && u.alive && !u.isPlayer);
         const wing = plan.flank === "left" ? sol.slice(0, 3) : sol.slice(-3).reverse();
         for (const u of wing) { if (this.flankers.size >= 2 + (Math.random() < 0.4 ? 1 : 0)) break; this.flankers.add(u); }
         this.order = null;
@@ -185,6 +184,7 @@ export class Brain {
     this.think -= dt;
     // order from a player captain overrides the general's plan (if it reached this unit)
     const plan = u.order ? { ...general.plan, ...u.order } : general.plan;
+    if (u.s.ability && u.abilityCd <= 0 && !u.busy() && !u.game.ended) u.game.supportAbility(u);   // heal / raise when ready
     if (this.think <= 0) { this.think = u.team !== u.game.settings.side ? u.game.diff.think : 0.25; this.decide(plan, general); }
     const t = u.target;
     if (t && t.alive && u.canAttack(t) && plan.stance !== "fallback" && !this.regrouping) u.startAttack(t);
@@ -194,7 +194,7 @@ export class Brain {
       let adj = null, ad = 1e9;
       for (const f of u.game.alive(u.game.enemyOf(u.team))) {
         const d = u.dist(f);
-        if (d < ad && d <= (u.type === "archer" ? u.s.bashRange : u.s.range) + f.radius) { ad = d; adj = f; }
+        if (d < ad && d <= (u.ranged ? u.s.bashRange : u.s.range) + f.radius) { ad = d; adj = f; }
       }
       if (adj && u.startAttack(adj) && !this.regrouping && plan.stance !== "fallback") u.target = adj;
     }
@@ -209,7 +209,7 @@ export class Brain {
     }
     // keep facing whoever we are swinging at / drawing on (archers shoot out to 10 m, and must never turn away mid-draw)
     const aim = u.attackTimer > 0 && u.pendingTarget?.alive ? u.pendingTarget : t;
-    const faceR = u.type === "archer" ? u.s.range + 1.5 : 6;
+    const faceR = u.ranged ? u.s.range + 1.5 : 6;
     if (aim && aim.alive && (u.dist(aim) < faceR || u.attackTimer > 0 || u.busy())) u.faceTo(aim.pos.x, aim.pos.z);
     else if (!this.engaged && this.goal && !desired.lengthSq()) {
       const { dir } = general.axes(); u.wantFacing = Math.atan2(dir.x, dir.y);   // stand facing the enemy
@@ -221,7 +221,7 @@ export class Brain {
     const u = this.u, g = u.game, foes = g.alive(g.enemyOf(u.team));
     if (!foes.length) { this.goal = null; return; }
     const allies = g.alive(u.team);
-    const captain = allies.find((a) => a.type === "captain" && a !== u);
+    const captain = allies.find((a) => a.captain && a !== u);
     if (captain && u.dist(captain) < 5) u.morale = Math.min(100, u.morale + 2.5 * u.trait.discipline);
     // catching your breath: away from the enemy, morale slowly recovers (less without a captain)
     if (foes.every((f) => u.dist(f) > 10)) u.morale = Math.min(captain ? 100 : 60, u.morale + 0.45 * u.trait.discipline);
@@ -234,17 +234,19 @@ export class Brain {
       const enemyAI = u.team !== g.settings.side;
       if (f.id === plan.focus) s += enemyAI ? g.diff.focus : 4;
       if (enemyAI && f.isPlayer) s += g.diff.huntCaptain;                  // harder enemies go for the player
-      if (f.type === "archer" && u.type !== "archer") s += 1.5;
-      if (f.type === "captain") s += 1.5;
-      if (u.type === "archer" && !g.world.lineClear(u.pos.x, u.pos.z, f.pos.x, f.pos.z)) s -= 6;
-      const crowd = allies.filter((a) => a !== u && a.target === f && a.type !== "archer").length;
-      if (u.type !== "archer" && crowd >= 3) s -= (crowd - 2) * 2.5;     // up to 3 can surround one target
+      if (f.ranged && !u.ranged) s += 1.5;
+      if (f.captain) s += 1.5;
+      if (u.s.hunter && (f.soft || f.type === "support")) s += u.s.hunter;   // scouts hunt archers, mages and healers
+      if (u.ranged === "magic") s += foes.filter((o) => o !== f && o.dist(f) < u.s.splash).length * 1.6;   // a blast wants a crowd
+      if (u.ranged && !g.world.lineClear(u.pos.x, u.pos.z, f.pos.x, f.pos.z)) s -= 6;
+      const crowd = allies.filter((a) => a !== u && a.target === f && !a.ranged).length;
+      if (!u.ranged && crowd >= 3) s -= (crowd - 2) * 2.5;     // up to 3 can surround one target
       if (f === u.target) s += 1.2;                                        // stickiness
-      if (u.type !== "archer" && d < u.s.range + 1.2) s += 3;             // whoever is in your face comes first
-      if (u.type !== "archer" && d < 7) {
+      if (!u.ranged && d < u.s.range + 1.2) s += 3;             // whoever is in your face comes first
+      if (!u.ranged && d < 7) {
         // bodyguard: an enemy hacking at one of our archers or our captain gets dealt with first
         const victim = f.target;
-        if (victim && victim.alive && victim.team === u.team && victim !== u && (victim.type === "archer" || victim.type === "captain")
+        if (victim && victim.alive && victim.team === u.team && victim !== u && (victim.ranged || victim.captain || victim.type === "support")
             && f.dist(victim) < f.s.range + victim.radius + 0.5) s += 3.5;
         // backstab: a foe busy with someone else, turned away from us, can't get its shield round
         if (victim && victim !== u && f.alive && Math.abs(angDiffA(Math.atan2(u.pos.x - f.pos.x, u.pos.z - f.pos.z), f.facing)) > 1.4) s += 1.5;
@@ -255,7 +257,7 @@ export class Brain {
     const nearest = Math.min(...foes.map((f) => u.dist(f)));
 
     // ---- regroup: badly hurt and scared -> back to the captain, return when morale recovers
-    if (!u.isPlayer && u.type !== "captain") {
+    if (!u.isPlayer && !u.captain) {
       if (!this.regrouping && u.hpFrac() < 0.35 && u.morale < 45) this.regrouping = true;
       if (this.regrouping && (u.morale > 65 || !captain)) this.regrouping = false;
     }
@@ -263,11 +265,11 @@ export class Brain {
     const lastStand = allies.length <= 1 || g.endgame;   // endgame: no more running away
     if (lastStand) this.regrouping = false;
     // line rotation: a badly hurt soldier pressed by two steps back behind a fresher comrade for a moment
-    if (!lastStand && !u.isPlayer && u.type === "soldier") {
+    if (!lastStand && !u.isPlayer && u.line) {
       if (this.rotateUntil && g.time < this.rotateUntil && this.rotateGoal) { this.goal = this.rotateGoal; this.engaged = false; return; }
-      const pressing = foes.filter((f) => f.type !== "archer" && u.dist(f) < 2.2);
+      const pressing = foes.filter((f) => !f.ranged && u.dist(f) < 2.2);
       if (u.hpFrac() < 0.25 && pressing.length >= 2 && (this.rotateBan ?? 0) < g.time) {
-        const cover = allies.find((a) => a !== u && a.type === "soldier" && !a.isPlayer && a.hpFrac() > 0.6 && u.dist(a) < 4);
+        const cover = allies.find((a) => a !== u && a.line && !a.isPlayer && a.hpFrac() > 0.6 && u.dist(a) < 4);
         if (cover) {
           const c = centroid(pressing), dx = u.pos.x - c.x, dz = u.pos.z - c.z, dd = Math.hypot(dx, dz) || 1;
           this.rotateGoal = { x: u.pos.x + dx / dd * 3, z: u.pos.z + dz / dd * 3, tol: 0.4, run: 1.1 };
@@ -294,8 +296,8 @@ export class Brain {
     if (ord.hold && g.time - g.lastHitTime > 30) { u.order = null; return; }
     if (ord.hold && ord.holdAt) {
       const at = ord.holdAt;
-      if (u.type === "archer") {
-        const t2 = foes.filter(shootable).sort((a, b) => u.dist(a) - u.dist(b))[0] || null;
+      if (!u.line && !u.captain) {
+        const t2 = u.ranged && foes.filter(shootable).sort((a, b) => u.dist(a) - u.dist(b))[0] || null;
         if (t2) u.target = t2;
         this.goal = { x: at.x, z: at.z, tol: 0.5 }; this.engaged = false; return;
       }
@@ -308,24 +310,24 @@ export class Brain {
     if (ord.follow && leader) {
       const followers = allies.filter((a) => a.order && a.order.follow && a !== leader).sort((a, b) => (a.id < b.id ? -1 : 1));
       const k = Math.max(0, followers.indexOf(u)), fac = leader.facing;
-      if (u.type === "archer") {
-        const t2 = foes.filter((f) => shootable(f) && f.dist(leader) < 7).sort((a, b) => a.dist(leader) - b.dist(leader))[0] || null;
+      if (!u.line) {
+        const t2 = u.ranged && foes.filter((f) => shootable(f) && f.dist(leader) < 7).sort((a, b) => a.dist(leader) - b.dist(leader))[0] || null;
         if (t2) u.target = t2;
-        const arc = followers.filter((a) => a.type === "archer"), j = Math.max(0, arc.indexOf(u)), m = Math.max(1, arc.length);
+        const arc = followers.filter((a) => !a.line), j = Math.max(0, arc.indexOf(u)), m = Math.max(1, arc.length);
         const ang = fac + Math.PI + (j - (m - 1) / 2) * 0.55;   // a line behind the captain
         this.goal = { x: leader.pos.x + Math.sin(ang) * 3.2, z: leader.pos.z + Math.cos(ang) * 3.2, tol: 0.6, run: 1.15 };
         this.engaged = false; return;
       }
       const threat = foes.filter((f) => f.dist(leader) < 3.6 || u.dist(f) < 1.8).sort((a, b) => u.dist(a) - u.dist(b))[0];
       if (threat) { u.target = threat; this.engaged = true; this.goal = this.surroundSpot(threat, allies); return; }
-      const mel = followers.filter((a) => a.type !== "archer"), j = Math.max(0, mel.indexOf(u)), m = Math.max(1, mel.length);
+      const mel = followers.filter((a) => a.line), j = Math.max(0, mel.indexOf(u)), m = Math.max(1, mel.length);
       const ang = fac + Math.PI * 0.5 + (m > 1 ? (j / (m - 1)) * Math.PI : Math.PI / 2);   // a half ring round his back and sides
       const r = 1.6 + (j % 2) * 0.5;
       this.goal = { x: leader.pos.x + Math.sin(ang) * r, z: leader.pos.z + Math.cos(ang) * r, tol: 0.45, run: 1.2 };
       this.engaged = false; return;
     }
     // SPLIT UP: go wide round the enemy's flank (side chosen when the order was given), then turn in and attack
-    if (ord.split && u.type !== "archer") {
+    if (ord.split && u.line) {
       if (!this.splitReached) {
         // open out sideways straight away (a ~9 m wide lane on that side), push forward along it until level with
         // the enemy, then turn in. Seen from above it reads as the line splitting and swinging round both sides.
@@ -347,30 +349,31 @@ export class Brain {
     // PROTECT ME: whoever threatens the captain gets everyone on him
     if (ord.guard && leader) {
       const threats = foes.filter((f) => f.dist(leader) < 4.5).sort((a, b) => a.dist(leader) - b.dist(leader));
-      if (u.type === "archer") {
-        const t2 = threats.find(shootable);
+      if (!u.line) {
+        const t2 = u.ranged && threats.find(shootable);
         if (t2) u.target = t2;
         if (u.dist(leader) > 5) { this.goal = { x: leader.pos.x, z: leader.pos.z, tol: 4, run: 1.15 }; return; }
-        return this.archerGoal(u.target, plan, general);
+        return u.ranged ? this.archerGoal(u.target, plan, general) : this.supportGoal(general);
       }
       if (threats.length) { u.target = threats[0]; this.engaged = true; this.goal = this.surroundSpot(threats[0], allies); return; }
       if (u.dist(leader) > 2.6) { this.goal = { x: leader.pos.x, z: leader.pos.z, tol: 2.2, run: 1.15 }; return; }
       this.goal = null; return;
     }
-    if (plan.protect && captain && u.type === "soldier" && u.dist(captain) > 3.5) {
+    if (plan.protect && captain && u.line && u.dist(captain) > 3.5) {
       this.goal = { x: captain.pos.x, z: captain.pos.z, tol: 2.2 }; return;
     }
-    if (u.type === "archer") return this.archerGoal(best, plan, general);
+    if (u.ranged) return this.archerGoal(best, plan, general);
+    if (u.type === "support") return this.supportGoal(general);
     // an AI captain who is badly hurt steps back behind the line while there is still a line to hide behind
-    if (u.type === "captain" && !u.isPlayer && u.hpFrac() < 0.4 && allies.filter((x) => x.type !== "archer").length > 3) {
+    if (u.captain && !u.isPlayer && u.hpFrac() < 0.4 && allies.filter((x) => x.line).length > 3) {
       const { dir } = general.axes();
       this.goal = { x: general.anchor.x - dir.x * 4.5, z: general.anchor.z - dir.y * 4.5, tol: 0.8, run: 1.1 }; this.engaged = false; return;
     }
 
     // ---- melee: march in formation until the enemy is close, then engage
     // mop-up: with only a couple of enemies left (or no soldiers of our own) even a careful captain goes in
-    const mopUp = foes.length <= 2 || !allies.some((a) => a.type === "soldier");
-    const engageR = g.endgame ? 999 : mopUp ? 30 : ord.charge ? 14 : (ENGAGE_R[u.type] ?? 5);
+    const mopUp = foes.length <= 2 || !allies.some((a) => a.line);
+    const engageR = g.endgame ? 999 : mopUp ? 30 : ord.charge ? 14 : (u.s.engage ?? (u.captain ? 3.0 : 5.5));
     this.engaged = nearest < engageR || (this.engaged && nearest < 9);
     const flanker = general.flankers.has(u);
     if (flanker && !this.flankReached && best && plan.flank) {
@@ -387,10 +390,30 @@ export class Brain {
     if (best) this.goal = this.surroundSpot(best, allies);
   }
 
+  // cleric / necromancer: stay a few metres behind our own melee line, near the hurt and the fallen, use the
+  // ability when it is ready, and only fight what walks right up to us (the opportunity strike in update)
+  supportGoal(general) {
+    const u = this.u, g = u.game, allies = g.alive(u.team).filter((a) => a !== u);
+    if (!u.alive) return;
+    const foes = g.alive(g.enemyOf(u.team));
+    const threat = foes.filter((f) => !f.ranged && u.dist(f) < 2.6).sort((a, b) => u.dist(a) - u.dist(b))[0];
+    if (threat && !g.endgame) {   // step away from a melee attacker (it is no fighter)
+      const dx = u.pos.x - threat.pos.x, dz = u.pos.z - threat.pos.z, d = Math.hypot(dx, dz) || 1;
+      this.goal = { x: u.pos.x + dx / d * 2.5, z: u.pos.z + dz / d * 2.5, tol: 0.3, run: 1.1 }; this.engaged = false; return;
+    }
+    const mel = allies.filter((a) => a.line || a.captain);
+    if (!mel.length) { const t = foes.sort((a, b) => u.dist(a) - u.dist(b))[0]; u.target = t; this.goal = t ? this.surroundSpot(t, allies) : null; return; }
+    // the most wounded melee ally that is still in the fight, else the middle of the line
+    const hurt = mel.filter((a) => a.hpFrac() < 0.8).sort((a, b) => a.hpFrac() - b.hpFrac())[0];
+    const c = hurt ? hurt.pos : centroid(mel), { dir } = general.axes();
+    this.goal = { x: c.x - dir.x * 2.6, z: c.z - dir.y * 2.6, tol: 1.0 };
+    this.engaged = false;
+  }
+
   // spread attackers of the same target around it (front, sides, behind) instead of stacking
   surroundSpot(t, allies) {
     const u = this.u, w = u.game.world;
-    const attackers = allies.filter((a) => a.target === t && a.type !== "archer").sort((a, b) => (a.id < b.id ? -1 : 1));
+    const attackers = allies.filter((a) => a.target === t && !a.ranged).sort((a, b) => (a.id < b.id ? -1 : 1));
     const k = Math.max(0, attackers.indexOf(u)), n = Math.max(1, attackers.length);
     const reach = u.s.range + t.radius;
     if (u.dist(t) <= reach * 0.95) return { x: u.pos.x, z: u.pos.z, tol: 9 };      // in range: stand and fight
@@ -409,13 +432,13 @@ export class Brain {
     if (!t) { this.goal = null; return; }
     const foes = g.alive(g.enemyOf(u.team));
     // an enemy archer right next to us: smack it (we can bash, it can only bash back)
-    const brawler = foes.filter((f) => f.type === "archer" && u.dist(f) <= u.s.bashRange + f.radius + 0.3)[0];
+    const brawler = foes.filter((f) => f.ranged && u.dist(f) <= u.s.bashRange + f.radius + 0.3)[0];
     if (brawler) { u.target = brawler; this.goal = null; return; }
     // kite away from anything that gets close (soldiers, captains, and archers that walked up to us)
-    const threat = foes.filter((f) => u.dist(f) < (f.type === "archer" ? 2.4 : 3.2)).sort((a, b) => u.dist(a) - u.dist(b))[0];
+    const threat = foes.filter((f) => u.dist(f) < (f.ranged ? 2.4 : 3.2)).sort((a, b) => u.dist(a) - u.dist(b))[0];
     const lastStand = g.alive(u.team).length <= 1 || g.endgame;
     if (threat && lastStand && u.dist(threat) <= u.s.bashRange + threat.radius + 0.6) { u.target = threat; this.goal = null; return; }   // cornered: fight
-    if (threat && threat.type === "archer") { u.target = threat; this.goal = { x: threat.pos.x, z: threat.pos.z, tol: u.s.bashRange * 0.8 }; return; }
+    if (threat && threat.ranged) { u.target = threat; this.goal = { x: threat.pos.x, z: threat.pos.z, tol: u.s.bashRange * 0.8 }; return; }
     // kiting budget: run for at most ~2.5 s, then stand and fight for a while (no endless chase in circles)
     const now = g.time;
     if (this.kiteStart != null && now - this.kiteStart > 2.5) { this.kiteBan = now + 6; this.kiteStart = null; }
@@ -446,7 +469,7 @@ export class Brain {
     if (los && d <= u.s.range * 0.92 && d >= u.s.minRange + 1 && (this.goal == null || this.settled)) { this.goal = null; this.settled = true; return; }
     this.settled = false;
     // pick a shooting spot ~70% of range away, with line of sight, preferring cover next to it
-    const want = u.s.range * 0.78, ownMelee = g.alive(u.team).filter((a) => a.type !== "archer");
+    const want = u.s.range * 0.78, ownMelee = g.alive(u.team).filter((a) => a.line);
     const frontLine = ownMelee.length ? centroid(ownMelee) : u.pos;
     let best = null, bestS = -1e9;
     for (let i = 0; i < 14; i++) {

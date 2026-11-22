@@ -1,14 +1,14 @@
 // A single fighter: model + animation state + combat state. Movement/decisions come from AI or the player.
 import * as THREE from "three";
-import { STATS, TEAM } from "./config.js";
+import { STATS, TEAM, LINE_TYPES } from "./config.js";
 import { spawnModel } from "./assets.js";
 export const HEAVY_CHARGE = 1.45;   // seconds in the raised stance before the heavy blow is ready (~1.6 s from the press)
 const PLAYER_CAPTAIN_DMG = 1.5;   // the player captain's sword (on top of full-damage quick swings)
 
 let nextId = 1;
-const ONE_SHOT = new Set(["attack", "attack2", "attack3", "shoot", "shoot_turn", "hit", "cheer", "idle_look", "idle_tap", "laugh", "rally"]);
+const ONE_SHOT = new Set(["attack", "attack2", "attack3", "shoot", "shoot_turn", "hit", "cheer", "idle_look", "idle_tap", "laugh", "rally", "cast", "heal", "raise", "slam"]);
 const CLAMP = new Set(["death", "death_fwd", "death_back", "block"]);
-const BUSY = new Set(["attack", "attack2", "attack3", "shoot", "shoot_turn", "hit", "laugh", "rally", "cheer"]);
+const BUSY = new Set(["attack", "attack2", "attack3", "shoot", "shoot_turn", "hit", "laugh", "rally", "cheer", "cast", "heal", "raise", "slam"]);
 const pick = (a) => a[Math.floor(Math.random() * a.length)];
 
 export class Unit {
@@ -16,6 +16,12 @@ export class Unit {
     this.game = game; this.team = team; this.type = type;
     this.id = `${team[0]}${nextId++}`;
     this.s = STATS[type];
+    // role flags (the AI and the player controls work on these, not on the type name)
+    this.ranged = this.s.ranged || false;        // shoots: "arrow" (archer, ranger captain) or "magic" (mage)
+    this.captain = !!this.s.captain;             // leads the army, gives orders
+    this.line = LINE_TYPES.includes(type);       // melee front line
+    this.soft = !!this.s.soft;                   // no armour: melee hurts it a lot more
+    this.dmgMul = 1;                             // veterans (campaign)
     this.hp = this.maxHp = this.s.hp;
     this.alive = true;
     this.pos = new THREE.Vector3(x, 0, z);
@@ -114,7 +120,7 @@ export class Unit {
   // sword reach, centre to centre. The player's own unit must really be at sword's length (~0.5 m between the
   // bodies) - AI units keep their longer, balance-tested reach.
   meleeReach(t) {
-    return this.isPlayer && this.type !== "archer" ? this.radius + t.radius + 0.55 : this.s.range + t.radius;
+    return this.isPlayer && !this.ranged ? this.radius + t.radius + 0.55 : this.s.range + t.radius;
   }
   // archer's bow-bash reach. The player's archer has no dead zone: anything too close to shoot gets bashed
   // (AI archers keep their tested reach)
@@ -125,14 +131,14 @@ export class Unit {
   // the player's melee: squarely facing the enemy when you pressed -> a slightly better blow; swinging at someone
   // off to the side or behind -> a weaker one. Tuned to average out (~2/3 of blows squared up = no net change).
   aimMult() {
-    if (!this.isPlayer || this.type === "archer") return 1;
+    if (!this.isPlayer || this.ranged) return 1;
     const a = this.aimTurn ?? 0;
     return a < 0.6 ? 1.06 : a < 1.4 ? 0.94 : 0.82;
   }
   canAttack(t) {
-    if (!t || !t.alive || this.cooldown > 0 || this.attackTimer > 0) return false;
+    if (!t || !t.alive || this.cooldown > 0 || this.attackTimer > 0 || this.stun > 0) return false;
     const d = this.dist(t);
-    if (this.type === "archer") {
+    if (this.ranged) {
       if (d <= this.bashReach(t)) return true;                                 // too close to shoot: bash
       return d >= this.s.minRange && d <= this.s.range && this.game.world.lineClear(this.pos.x, this.pos.z, t.pos.x, t.pos.z);
     }
@@ -144,14 +150,19 @@ export class Unit {
     const turn = Math.abs(angDiff(Math.atan2(t.pos.x - this.pos.x, t.pos.z - this.pos.z), this.facing));
     this.pendingTarget = t; this.attackTimer = this.s.windup; this.cooldown = this.s.cooldown * (0.9 + Math.random() * 0.2) / (this.type === "archer" ? (TEAM[this.team].archerRate ?? 1) : 1);
     // arcade feel for the player's melee: twice as many swings, half damage each -> same damage per second
-    this.quick = this.isPlayer && this.type !== "archer";
+    this.target0 = { x: t.pos.x, z: t.pos.z };   // where a spell is aimed (it lands there, not on whoever is there later)
+    this.quick = this.isPlayer && !this.ranged;
     if (this.quick) { this.cooldown *= 0.5; this.attackTimer = this.s.windup * 0.6; }   // ~0.2 s from press to impact
     // the player's archer turns round to the target quickly but visibly (you see him spin and draw); everyone else snaps
-    this.faceTo(t.pos.x, t.pos.z, !(this.isPlayer && this.type === "archer"));
-    this.quick = this.isPlayer && this.type !== "archer";
-    this.bashing = this.type === "archer" && this.dist(t) <= this.bashReach(t);
+    this.faceTo(t.pos.x, t.pos.z, !(this.isPlayer && this.ranged));
+    this.quick = this.isPlayer && !this.ranged;
+    this.bashing = this.ranged && this.dist(t) <= this.bashReach(t);
     if (this.bashing) { this.attackTimer = 0.3; this.cooldown = this.s.bashCooldown; this.play(this.variant("attack", "attack3"), 0.08, 1.2); this.game.sfx("swing"); }
-    else if (this.type === "archer") {
+    else if (this.ranged === "magic" || (this.ranged && !this.actions.shoot_turn && this.actions.cast)) {
+      // a spell: slow wind-up (the cast clip, or a slowed staff thrust until the model has one)
+      this.play(this.variant("cast", "attack"), 0.1, this.actions.cast ? 1 : 0.6); this.game.sfx("draw"); this.cooldownMax = this.cooldown;
+    }
+    else if (this.ranged) {
       // target in front: the crisp, decisive shot; swinging round to the side / behind: the softer original one
       this.play(turn > 1.05 && this.actions.shoot_turn ? "shoot_turn" : "shoot", 0.1); this.game.sfx("draw"); this.cooldownMax = this.cooldown;
     }
@@ -165,6 +176,8 @@ export class Unit {
         // undecided press: raise the sword at normal speed while we find out if it is a tap or a hold
         // (main.js decides: release -> the chop speeds up and lands; keep holding -> it rises on into the heavy stance)
         this.play("attack", 0.05, 1.0); this.freshPending = true; this.attackTimer = 0.6;
+      } else if (this.s.slam && this.actions.slam && !this.quick) {
+        this.play("slam", 0.08, 1.0);
       } else {
         this.play(this.variant("attack", "attack2", "attack2", "attack3"), this.quick ? 0.05 : 0.08, this.quick ? 1.5 : 1.0);
         if (this.quick && this.current) this.current.time = 0.06;   // player: skip the first sliver of the wind-up -> snappier
@@ -182,7 +195,7 @@ export class Unit {
   }
   // ---- player's heavy blow: hold the attack button -> raise the sword and hold it (charging) -> release
   startCharge() {
-    if (this.charging || this.type === "archer" || !this.actions.attack) return;
+    if (this.charging || this.ranged || !this.actions.attack) return;
     this.charging = true; this.chargeT = 0; this.chargeReady = false;
     const a = this.actions.attack;
     // already rising in the chop: keep rising smoothly and stop at the top (see update)
@@ -211,7 +224,7 @@ export class Unit {
       this.heavy = false;
       const t = this.pendingTarget; this.pendingTarget = null;
       if (!t || !t.alive || !this.alive || this.dist(t) > this.meleeReach(t) + 0.3) return;
-      const dmg = Math.round(rint(this.s.dmg) * (this.type === "captain" ? 2 * PLAYER_CAPTAIN_DMG : 1.6) * this.aimMult());   // soldiers: a milder heavy blow
+      const dmg = Math.round(rint(this.s.dmg) * (this.captain ? 2 * PLAYER_CAPTAIN_DMG : 1.6) * this.aimMult());   // soldiers: a milder heavy blow
       this.heavyHit = true; const dealt = this.game.applyHit(this, t, dmg); this.heavyHit = false;
       // knock the target back half a metre (if there is room)
       const dx = t.pos.x - this.pos.x, dz = t.pos.z - this.pos.z, d = Math.hypot(dx, dz) || 1;
@@ -225,15 +238,62 @@ export class Unit {
       if (this.dist(t) <= this.bashReach(t) + 0.35) this.game.applyHit(this, t, rint(this.s.bashDmg));
       return;
     }
-    if (this.type === "archer") { this.game.fireArrow(this, t); return; }
+    if (this.ranged) { this.game.fireArrow(this, t); return; }
     if (this.dist(t) > this.meleeReach(t) + (this.isPlayer ? 0.2 : 0.35)) return; // target stepped away
-    const dmg = Math.round(rint(this.s.dmg) * (this.order?.charge ? 1.05 : 1));   // charging: a bit harder blows
+    let dmg = Math.round(rint(this.s.dmg) * (this.order?.charge ? 1.05 : 1));   // charging: a bit harder blows
+    // spearman: braced against anyone running onto the point (moving towards us, charging on orders, big brutes)
+    if (this.s.brace) {
+      const dx = this.pos.x - t.pos.x, dz = this.pos.z - t.pos.z, d = Math.hypot(dx, dz) || 1;
+      const closing = (t.vel.x * dx + t.vel.z * dz) / d;
+      if (closing > 0.8 || t.order?.charge || t.type === "monster" || t.type === "brute") dmg = Math.round(dmg * this.s.brace);
+      else if (this.order?.hold) dmg = Math.round(dmg * 1.2);
+    }
     // the player's quick swings: full damage at twice the rate, and the captain hits harder still - the hero should
     // feel like one, but a lone charge into a crowd still ends badly (they all hit back, and they hunt the player)
-    this.game.applyHit(this, t, this.quick ? Math.round(dmg * (this.type === "captain" ? PLAYER_CAPTAIN_DMG : 1) * this.aimMult()) : dmg);
+    this.game.applyHit(this, t, this.quick ? Math.round(dmg * (this.captain ? PLAYER_CAPTAIN_DMG : 1) * this.aimMult()) : dmg);
+    // brute / heavy captain: the swing also catches one more enemy in front, next to the target
+    if (this.s.cleave && !this.quick) {
+      const other = this.game.alive(this.game.enemyOf(this.team)).filter((f) => f !== t && this.dist(f) <= this.s.range + f.radius + 0.2
+        && Math.abs(angDiff(Math.atan2(f.pos.x - this.pos.x, f.pos.z - this.pos.z), this.facing)) < 1.2).sort((a, b) => this.dist(a) - this.dist(b))[0];
+      if (other) this.game.applyHit(this, other, Math.round(dmg * this.s.cleave));
+    }
+    // monster: the slam throws everyone around the point of impact
+    if (this.s.slam) this.game.slam(this, t);
+  }
+  // thrown through the air (monster slam): pushed away over ~0.4 s in a short arc, stunned for a moment
+  knockBack(fromX, fromZ, dist) {
+    if (!this.alive) return;
+    const dx = this.pos.x - fromX, dz = this.pos.z - fromZ, d = Math.hypot(dx, dz) || 1;
+    this.lungeDir.set(dx / d, 0, dz / d); this.lunge = 0.4; this.lungeSpeed = dist / 0.4;
+    this.air = { t: 0, dur: 0.45, h: 0.45 + dist * 0.12 }; this.stun = 0.9;
+    this.attackTimer = 0; this.pendingTarget = null; this.freshPending = false;
+    if (this.charging) this.cancelCharge();
+    this.play("hit", 0.05);
+  }
+  // the necromancer's raise: back on its feet with part of its life
+  revive(frac) {
+    this.alive = true; this.hp = Math.max(1, Math.round(this.maxHp * frac)); this.morale = 70;
+    this.deadT = 0; this.fading = false; this.root.visible = true; this.ring.visible = true; this.hpBar.visible = true;
+    if (this.matColors) this.mats.forEach((m, i) => { m.transparent = false; m.opacity = 1; m.color.copy(this.matColors[i]); });
+    this.root.traverse((o) => { if (o.isMesh) { const hull = o.material?.side === THREE.BackSide; o.castShadow = !hull; o.visible = true; } });
+    this.target = null; this.order = null; this.cooldown = 1; this.attackTimer = 0; this.current = null; this.raised = true;
+    if (this.brain) { this.brain.regrouping = false; this.brain.goal = null; }
+    this.play(this.variant("cheer2", "cheer", "idle"), 0.2);
   }
   takeHit(attacker, dmg, ranged) {
     if (!this.alive) return 0;
+    // tower shield: arrows and spells from the front mostly stop on it
+    if (ranged && this.s.arrowBlock && !this.charging) {
+      const ang = Math.atan2(attacker.pos.x - this.pos.x, attacker.pos.z - this.pos.z);
+      if (Math.abs(angDiff(ang, this.facing)) < 1.0 && Math.random() < this.s.arrowBlock) {
+        this.play("block", 0.05); this.blocking = 0.35; this.game.sfx("block"); this.game.onBlock(attacker, this); return 0;
+      }
+    }
+    // spearman: the long pole is useless against someone at his side or back
+    if (this.s.flankTaken && !ranged) {
+      const ang = Math.atan2(attacker.pos.x - this.pos.x, attacker.pos.z - this.pos.z);
+      if (Math.abs(angDiff(ang, this.facing)) > 1.4) dmg = Math.round(dmg * this.s.flankTaken);
+    }
     // shield block: only when facing the attacker
     if (this.s.shield && !ranged && !attacker.heavyHit && !this.charging) {   // (no guard while your sword is raised)   // a heavy blow smashes through the guard
       const ang = Math.atan2(attacker.pos.x - this.pos.x, attacker.pos.z - this.pos.z);
@@ -296,6 +356,7 @@ export class Unit {
       this.deadT = (this.deadT || 0) + dt;
       if (this.deadT > 1.3 && !this.fading) {
         this.fading = true;
+        this.matColors ??= this.mats.map((m) => m.color.clone());   // (kept for a necromancer's raise)
         for (const m of this.mats) { m.transparent = true; m.color.multiplyScalar(0.55); }
         this.root.traverse((o) => {
           if (o.isMesh) o.castShadow = false;    // a fading body must not keep a solid shadow
@@ -310,10 +371,11 @@ export class Unit {
       }
       return;
     }
-    this.cooldown -= dt; this.blocking -= dt;
+    this.cooldown -= dt; this.blocking -= dt; this.stun = Math.max(0, (this.stun || 0) - dt);
+    if (this.s.ability) this.abilityCd = (this.abilityCd ?? this.s.ability * (0.4 + Math.random() * 0.4)) - dt;
     if (this.attackTimer > 0) { this.attackTimer -= dt; if (this.attackTimer <= 0) this.resolveAttack(); }
     // the player keeps more mobility while swinging (arcade feel); AI units plant their feet
-    const slow = this.charging ? 0.5 : this.attackTimer > 0 || this.busy() ? (this.isPlayer ? 0.55 : 0.25) : 1;
+    const slow = this.stun > 0 ? 0 : this.charging ? 0.5 : this.attackTimer > 0 || this.busy() ? (this.isPlayer ? 0.55 : 0.25) : 1;
     const v = desired.clone().multiplyScalar(slow);
 
     // separation from other units
@@ -346,9 +408,13 @@ export class Unit {
     // solid obstacles: the body (radius + a small margin for shield / shoulders) stays out of their real outlines
     [this.pos.x, this.pos.z] = w.collide(this.pos.x, this.pos.z, this.radius + 0.06);
     const speed = Math.hypot(this.vel.x, this.vel.z);
-    if (speed > 0.3 && !(this.attackTimer > 0) && !(this.type === "archer" && !this.isPlayer && this.busy())) this.wantFacing = Math.atan2(this.vel.x, this.vel.z);
+    if (speed > 0.3 && !(this.attackTimer > 0) && !(this.ranged && !this.isPlayer && this.busy())) this.wantFacing = Math.atan2(this.vel.x, this.vel.z);
     if (this.wantFacing !== undefined) this.facing += angDiff(this.wantFacing, this.facing) * Math.min(1, dt * (this.isPlayer ? 18 : 10));
     this.root.position.copy(this.pos);
+    if (this.air) {   // thrown by a slam: a short arc through the air
+      this.air.t += dt; const k = Math.min(1, this.air.t / this.air.dur);
+      this.root.position.y = Math.sin(Math.PI * k) * this.air.h; if (k >= 1) this.air = null;
+    }
     this.root.rotation.y = this.facing;
     const holdingBlock = this.current === this.actions.block && this.blocking > 0;
     const curName = this.current ? this.current.getClip().name : "";
@@ -359,13 +425,15 @@ export class Unit {
       if (speed > 0.35) this.play("walk", 0.2, Math.max(0.7, speed / 2.4));
       else if (this.morale < 28 && !this.isPlayer && this.actions.fear) this.play("fear", 0.3);
       else if (flavourRunning) { /* let the idle flourish finish */ }
+      // spearman: spear lowered and braced in a fight or when holding the line (upright again once it is calm)
+      else if (this.actions.ready && this.type === "spearman" && (this.order?.hold || (this.target?.alive && this.dist(this.target) < 4))) this.play("ready", 0.3);
       else if (this.idleT > (this.idleWait ??= 5 + Math.random() * 7) && !this.ended) {
         this.idleT = 0; this.idleWait = 6 + Math.random() * 8;
         this.play(this.variant("idle_look", "idle_tap"), 0.25);
       } else this.play("idle", 0.25);
     }
     // reload ring: the player's archer only (the heavy sword blow has no ring - you hear when it is ready)
-    if (this.isPlayer && this.type === "archer") this.updateReloadRing(this.cooldown > 0 && this.cooldownMax ? Math.min(1, 1 - this.cooldown / this.cooldownMax) : 1);
+    if (this.isPlayer && this.ranged) this.updateReloadRing(this.cooldown > 0 && this.cooldownMax ? Math.min(1, 1 - this.cooldown / this.cooldownMax) : 1);
     // hp bar faces camera, flash on hit
     const f = this.hpFrac(), fill = this.hpBar.userData.fill;
     fill.scale.x = Math.max(0.001, f); fill.position.x = -(1 - f) * 0.31;

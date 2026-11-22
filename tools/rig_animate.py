@@ -9,7 +9,7 @@ Usage:
     facing_deg: rotation about Z (degrees) that makes the model face -Y (Blender front)
     kind: soldier | archer | captain
 """
-import sys, math, bpy, bmesh
+import sys, os, math, bpy, bmesh
 from mathutils import Vector, Matrix
 
 argv = sys.argv[sys.argv.index("--") + 1:]
@@ -77,11 +77,27 @@ bpy.ops.object.transform_apply(scale=True)
 vs = [v.co.copy() for v in body.data.vertices]
 # centre on the feet (lowest 6%) rather than the bbox, so a big shield doesn't shift the pivot
 feet = [v for v in vs if v.z - mn.z * s < 0.06]
+FEET_CX = None
 if LONG or HANG:   # leave the spear butt / axe head out of the feet centre: use the head's centre line
     _hd = sorted(v.x for v in vs if v.z - mn.z * s > 0.85)
     _m = _hd[len(_hd) // 2]
     feet = [v for v in feet if abs(v.x - _m) < 0.18]
-cx = sum(v.x for v in feet) / len(feet); cy = sum(v.y for v in feet) / len(feet)
+    # a lopsided hood/hat skews the head line: if the feet split into separate clusters (two boots + maybe the
+    # spear butt), centre between the two biggest ones instead
+    _f = sorted((v for v in vs if v.z - mn.z * s < 0.06), key=lambda v: v.x); _cl = [[_f[0]]] if _f else []
+    for a_, b_ in zip(_f, _f[1:]):
+        if b_.x - a_.x > 0.03: _cl.append([])
+        _cl[-1].append(b_)
+    _cl = sorted(_cl, key=len, reverse=True)
+    if len(_cl) >= 2 and len(_cl[1]) > 0.3 * len(_cl[0]):
+        feet = _cl[0] + _cl[1]
+        FEET_CX = (sum(v.x for v in _cl[0]) / len(_cl[0]) + sum(v.x for v in _cl[1]) / len(_cl[1])) / 2
+        print("FEET two boots, centre", round(FEET_CX, 3))
+    else:   # robe down to the ground (no separate boots): centre on the belt line instead
+        _belt = sorted(v.x for v in vs if 0.36 < v.z - mn.z * s < 0.52)
+        FEET_CX = _belt[len(_belt) // 2]
+        print("FEET belt centre", round(FEET_CX, 3))
+cx = FEET_CX if FEET_CX is not None else sum(v.x for v in feet) / len(feet); cy = sum(v.y for v in feet) / len(feet)
 for v in body.data.vertices:
     v.co.x -= cx; v.co.y -= cy; v.co.z -= mn.z * s
 
@@ -96,7 +112,9 @@ if LONG:
     tip = [c.copy() for c in _side if c.z > _ztop - 0.06]
     t = sum(tip, Vector()) / max(1, len(tip))
     # the boots are on the inner side (towards x=0): keep the butt search narrow in x so they don't skew the line
-    butt = [v.co.copy() for v in me.vertices if v.co.z < 0.15 and abs(v.co.x - t.x) < 0.08 and abs(v.co.y - t.y) < 0.15]
+    butt = [v.co.copy() for v in me.vertices if v.co.z < 0.15 and abs(v.co.x - t.x) < 0.08]
+    if butt:   # the butt = the lowest end under the tip (a staff may slant back in depth, so no y window)
+        _zb = min(c.z for c in butt); butt = [c for c in butt if c.z < _zb + 0.05]
     if tip and butt:
         b = sum(butt, Vector()) / len(butt); axis = (t - b).normalized()
         for _ in range(2):   # refine: re-fit the line on shaft vertices near both ends
@@ -106,8 +124,11 @@ if LONG:
             if lo and hi:
                 b = sum(lo, Vector()) / len(lo); t2 = sum(hi, Vector()) / len(hi); axis = (t2 - b).normalized()
         SPEAR = (b, axis)
-        def near(co, r=0.035):
+        def near(co, r=float(os.environ.get("SPEAR_R", "0.035"))):
             p = co - b; return (p - axis * p.dot(axis)).length < r and co.x < -0.08
+        if os.environ.get("SPEAR_DUMP"):
+            with open(os.environ["SPEAR_DUMP"], "w") as fh:
+                for v in me.vertices: fh.write("%.4f %.4f %.4f\n" % tuple(v.co))
         bm = bmesh.new(); bm.from_mesh(me)
         sp = {f for f in bm.faces if all(near(v.co) for v in f.verts)}
         cut = [e for e in bm.edges if len(e.link_faces) > 1 and len({f in sp for f in e.link_faces}) > 1]
@@ -279,15 +300,31 @@ if SPEAR:
         if a != c: par[a] = c
     isl = {}
     for v in me.vertices: isl.setdefault(find(v.index), []).append(v)
-    n = 0
+    n = 0; touch = set()
     for vs_ in isl.values():
         def dl(co): p = co - b; return (p - axis * p.dot(axis)).length
-        close = sum(1 for v in vs_ if dl(v.co) < 0.05)
-        if close > 0.8 * len(vs_) or (len(vs_) < 3000 and all(v.co.x < -0.2 for v in vs_)):   # + loose bits of the weapon head beside the body
+        close = sum(1 for v in vs_ if dl(v.co) < max(0.05, float(os.environ.get("SPEAR_R", "0.035")) + 0.01))
+        loose = len(vs_) < 3000 and all(v.co.x < -0.2 for v in vs_)
+        if os.environ.get("SPEAR_DEBUG"):
+            print("ISL", len(vs_), "close", close, "loose", loose, "x", round(min(v.co.x for v in vs_), 3), round(max(v.co.x for v in vs_), 3),
+                  "z", round(min(v.co.z for v in vs_), 3), round(max(v.co.z for v in vs_), 3))
+        if (close > 0.8 * len(vs_) or loose) and len(vs_) < 150 and max(v.co.z for v in vs_) < 0.12:
+            touch.update(v.index for v in vs_)   # a lone butt cap cut off from its shaft: it would float as debris
+        elif close > 0.8 * len(vs_) or loose:   # + loose bits of the weapon head beside the body
             for v in vs_:
                 for g in groups.values(): g.remove([v.index])
                 groups["arm.R"].add([v.index], 1.0, "REPLACE"); n += 1
-    print("SPEAR_RIGID verts", n, "islands", len(isl))
+        elif close >= 10:
+            # the body still touches the spear line: where the butt rests on the boot or the blade brushes the hood,
+            # Pixal3D fuses them, and those faces stretch into a plank once the spear is levelled. Drop the touching
+            # vertices away from the fist (the fist wraps the shaft and moves with the arm anyway).
+            for v in vs_:
+                if dl(v.co) < 0.05 and v.co.x < -0.2 and (v.co.z < 0.25 or v.co.z > 0.7): touch.add(v.index)
+    print("SPEAR_RIGID verts", n, "islands", len(isl), "touch dropped", len(touch))
+    if touch:
+        bm = bmesh.new(); bm.from_mesh(me); bm.verts.ensure_lookup_table()
+        bmesh.ops.delete(bm, geom=[bm.verts[i] for i in touch], context="VERTS")
+        bm.to_mesh(me); bm.free()
 
 if HANG_X is not None:
     # whole islands only (the weapon was cut free): a body vertex that merely pokes into the region stays with the

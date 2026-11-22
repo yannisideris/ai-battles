@@ -48,13 +48,13 @@
 |---|---|---|
 | Λογχοφόρος | ✅ `human_spearman` | ✅ `skeleton_spearman` |
 | Βαρύς πολεμιστής | ✅ `human_brute` | ✅ `skeleton_brute` (rig με `HANG_X=-0.21 HANG_LOW=-0.24`) |
-| Ασπιδοφόρος | ✅ `human_shieldbearer` | ⏳ νέα εικόνα: το φέρετρο ακουμπά το πόδι και στραβώνει στις επιθέσεις |
+| Ασπιδοφόρος | ✅ `human_shieldbearer` | ✅ `skeleton_shieldbearer` (εκδοχή v2: φέρετρο πάνω από το έδαφος) |
 | Υποστήριξη | ✅ `human_cleric` | ✅ `skeleton_necromancer` |
 | Μάγος | ✅ `human_mage` | ✅ `skeleton_mage` (η εκδοχή B απορρίφθηκε) |
-| Ανιχνευτής | ✅ `human_scout` | ⏳ νέα εικόνα: ο γκουλ σκυμμένος χαλάει το rig· θέλει όρθια στάση |
+| Ανιχνευτής | ✅ `human_scout` | ✅ `skeleton_ghoul` (όρθια εκδοχή· το σκύψιμο θα δοθεί με κίνηση) |
 | Τέρας | ✅ `human_golem` | ✅ `skeleton_colossus` |
-| Αρχηγός 1 | ✅ `human_ranger_captain` | ⏳ Λιτς (εικόνα) |
-| Αρχηγός 2 | ✅ `human_paladin_captain` | ⏳ Μαύρος ιππότης (εικόνα) |
+| Αρχηγός 1 | ✅ `human_ranger_captain` | ✅ `skeleton_lich_captain` (rig με `SPEAR_R=0.05`) |
+| Αρχηγός 2 | ✅ `human_paladin_captain` | ✅ `skeleton_deathknight_captain` (kind `hammer`, `SPEAR_R=0.065`) |
 
 Γνωστά θέματα για τη συνεδρία του κώδικα:
 - Κανένα νέο μοντέλο δεν είναι ακόμα στο `MODEL_FILES` (`config.js`)· δοκιμή στο παιχνίδι με `?preview_<team>_<type>=<model>`.

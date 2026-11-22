@@ -2,6 +2,7 @@
 import * as THREE from "three";
 import { STATS, TEAM, LINE_TYPES } from "./config.js";
 import { spawnModel } from "./assets.js";
+const CAST_RELEASE = 0.77;   // the cast clip lets the spell go at 0.77 s (scaled to each caster's windup)
 export const HEAVY_CHARGE = 1.45;   // seconds in the raised stance before the heavy blow is ready (~1.6 s from the press)
 const PLAYER_CAPTAIN_DMG = 1.5;   // the player captain's sword (on top of full-damage quick swings)
 
@@ -160,7 +161,7 @@ export class Unit {
     if (this.bashing) { this.attackTimer = 0.3; this.cooldown = this.s.bashCooldown; this.play(this.variant("attack", "attack3"), 0.08, 1.2); this.game.sfx("swing"); }
     else if (this.ranged === "magic" || (this.ranged && !this.actions.shoot_turn && this.actions.cast)) {
       // a spell: slow wind-up (the cast clip, or a slowed staff thrust until the model has one)
-      this.play(this.variant("cast", "attack"), 0.1, this.actions.cast ? 1 : 0.6); this.game.sfx("draw"); this.cooldownMax = this.cooldown;
+      this.play(this.actions.cast ? "cast" : "attack", 0.1, this.actions.cast ? CAST_RELEASE / this.s.windup : 0.6); this.game.sfx("draw"); this.cooldownMax = this.cooldown;
     }
     else if (this.ranged) {
       // target in front: the crisp, decisive shot; swinging round to the side / behind: the softer original one

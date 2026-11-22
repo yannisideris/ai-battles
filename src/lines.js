@@ -517,7 +517,10 @@ export const UI = {
     noLos: "No line of sight", tooClose: "Too close for the bow", outOfRange: "Out of range",
     youFell: "You have fallen! The battle goes on without you...", enemy: "Enemy",
     help: "Arrows / left stick: move · Space / A: attack (hold: heavy blow) · Esc / Start: pause",
-    takeOver: { soldier: "You fight on as a soldier!", archer: "You fight on as an archer!" },
+    takeOver: { soldier: "You fight on as a soldier!", archer: "You fight on as an archer!", spearman: "You fight on as a spearman!",
+      brute: "You fight on as a brute!", shieldbearer: "You fight on as a shieldbearer!", mage: "You fight on as a mage!",
+      scout: "You fight on as a scout!", monster: "You fight on as the monster!", support_human: "You fight on as the cleric!", support_skeleton: "You fight on as the necromancer!",
+      captain_ranged: "You lead on!", captain_heavy: "You lead on!", captain: "You lead on!" },
     notes: { advance: "advancing", hold: "holding the line", fallback: "falling back", flank: "flanking" },
   },
   el: {
@@ -528,7 +531,10 @@ export const UI = {
     noLos: "Δεν φαίνεται ο στόχος", tooClose: "Πολύ κοντά για τόξο", outOfRange: "Εκτός βεληνεκούς",
     youFell: "Έπεσες! Η μάχη συνεχίζεται χωρίς εσένα...", enemy: "Εχθρός",
     help: "Βελάκια / αριστερός μοχλός: κίνηση · Space / A: επίθεση (κράτημα: βαρύ χτύπημα) · Esc / Start: παύση",
-    takeOver: { soldier: "Συνεχίζεις ως στρατιώτης!", archer: "Συνεχίζεις ως τοξότης!" },
+    takeOver: { soldier: "Συνεχίζεις ως στρατιώτης!", archer: "Συνεχίζεις ως τοξότης!", spearman: "Συνεχίζεις ως λογχοφόρος!",
+      brute: "Συνεχίζεις ως βαρύς πολεμιστής!", shieldbearer: "Συνεχίζεις ως ασπιδοφόρος!", mage: "Συνεχίζεις ως μάγος!",
+      scout: "Συνεχίζεις ως ανιχνευτής!", monster: "Συνεχίζεις ως το τέρας!", support_human: "Συνεχίζεις ως κληρικός!", support_skeleton: "Συνεχίζεις ως νεκρομάντης!",
+      captain_ranged: "Συνεχίζεις ως αρχηγός!", captain_heavy: "Συνεχίζεις ως αρχηγός!", captain: "Συνεχίζεις ως αρχηγός!" },
     notes: { advance: "προελαύνει", hold: "κρατάει θέση", fallback: "υποχωρεί", flank: "πλευροκοπεί" },
   },
 };

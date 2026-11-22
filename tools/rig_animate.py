@@ -653,6 +653,106 @@ if KIND not in ("archer", "brute", "golem"):
 if KIND in ("spearman", "staff"):   # hammer: head above the hand like a sword blade -> keeps the sword swings
     spear_clips()
 
+# ---- golem / colossus: huge arms, so the big generic raises (-160..-170) swing them through the body and show their
+#   insides. Shorter, heavier moves instead.
+if KIND == "golem":
+    for _n in ("block", "shoot", "cheer", "cheer2"):
+        if bpy.data.actions.get(_n): bpy.data.actions.remove(bpy.data.actions[_n])
+    make_action("block", 0.4, {         # forearms brought up in front of the face, braced
+        0.0: {"arm.L": (0, 0, 0), "arm.R": (0, 0, 0), "chest": (0, 0, 0), "head": (0, 0, 0), "hips": {"loc": (0, 0, 0)}},
+        1.0: {"arm.L": (-55, 0, -18), "arm.R": (-55, 0, 18), "chest": (10, 0, 0), "head": (10, 0, 0), "hips": {"loc": (0, 0, -0.02)}},
+    }, loop=False)
+    make_action("shoot", 0.9, {         # (not used by the game) a roar: chest out, arms spread
+        0.0: {"arm.L": (0, 0, 0), "arm.R": (0, 0, 0), "chest": (0, 0, 0), "head": (0, 0, 0)},
+        0.4: {"arm.L": (-20, 0, 35), "arm.R": (-20, 0, -35), "chest": (-12, 0, 0), "head": (-18, 0, 0)},
+        0.7: {"arm.L": (-20, 0, 35), "arm.R": (-20, 0, -35), "chest": (-12, 0, 0), "head": (-18, 0, 0)},
+        1.0: {"arm.L": (0, 0, 0), "arm.R": (0, 0, 0), "chest": (0, 0, 0), "head": (0, 0, 0)},
+    }, loop=False)
+    make_action("cheer", 1.0, {         # pounds its chest twice
+        0.0: {"arm.L": (0, 0, 0), "arm.R": (0, 0, 0), "chest": (0, 0, 0), "head": (0, 0, 0)},
+        0.2: {"arm.L": (-50, 0, -30), "arm.R": (-20, 0, 10), "chest": (-8, 0, 0), "head": (-12, 0, 0)},
+        0.35: {"arm.L": (-20, 0, 10), "arm.R": (-50, 0, 30), "chest": (-8, 0, 0), "head": (-12, 0, 0)},
+        0.5: {"arm.L": (-50, 0, -30), "arm.R": (-20, 0, 10), "chest": (-8, 0, 0), "head": (-12, 0, 0)},
+        0.65: {"arm.L": (-20, 0, 10), "arm.R": (-50, 0, 30), "chest": (-8, 0, 0), "head": (-12, 0, 0)},
+        1.0: {"arm.L": (0, 0, 0), "arm.R": (0, 0, 0), "chest": (0, 0, 0), "head": (0, 0, 0)},
+    }, loop=False)
+    make_action("cheer2", 1.0, {        # heavy stomping victory: rock side to side, fists half up
+        0.0: {"root": {"loc": (0, 0, 0), "rot": (0, -6, 0)}, "arm.L": (-45, 0, 25), "arm.R": (-30, 0, -15), "thigh.R": (-25, 0, 0), "shin.R": (30, 0, 0), "head": (-10, 0, 0)},
+        0.25: {"root": {"loc": (0, 0, 0.05), "rot": (0, 0, 0)}, "arm.L": (-50, 0, 20), "arm.R": (-50, 0, -20), "head": (-14, 0, 0)},
+        0.5: {"root": {"loc": (0, 0, 0), "rot": (0, 6, 0)}, "arm.L": (-30, 0, 15), "arm.R": (-45, 0, -25), "thigh.L": (-25, 0, 0), "shin.L": (30, 0, 0), "head": (-10, 0, 0)},
+        0.75: {"root": {"loc": (0, 0, 0.05), "rot": (0, 0, 0)}, "arm.L": (-50, 0, 20), "arm.R": (-50, 0, -20), "head": (-14, 0, 0)},
+    })
+    # slam: both fists up over the head, rise, then smash the ground. Impact at 0.55 (= monster windup 0.6 s).
+    _sl = {"root": {"rot": (0, 0, 0), "loc": (0, 0, 0)}, "arm.L": (0, 0, 0), "arm.R": (0, 0, 0), "chest": (0, 0, 0), "head": (0, 0, 0),
+           "thigh.L": (0, 0, 0), "thigh.R": (0, 0, 0), "shin.L": (0, 0, 0), "shin.R": (0, 0, 0), "hips": {"loc": (0, 0, 0)}}
+    def _pose(**kw):
+        p = dict(_sl); p.update(kw); return p
+    _act = make_action("slam", 1.1, {
+        0.0: _sl,
+        0.30: _pose(**{"arm.L": (-55, 0, 25), "arm.R": (-55, 0, -25), "chest": (-26, 0, 0), "head": (-10, 0, 0),
+                       "root": {"rot": (0, 0, 0), "loc": (0, 0.05, 0.04)}}),
+        0.45: _pose(**{"arm.L": (-60, 0, 22), "arm.R": (-60, 0, -22), "chest": (-30, 0, 0), "head": (-12, 0, 0),
+                       "root": {"rot": (0, 0, 0), "loc": (0, 0.06, 0.06)}}),
+        0.55: _pose(**{"arm.L": (-25, 0, 10), "arm.R": (-25, 0, -10), "chest": (32, 0, 0), "head": (8, 0, 0),
+                       "root": {"rot": (0, 0, 0), "loc": (0, -0.08, -0.03)}, "thigh.L": (-30, 0, 0), "shin.L": (35, 0, 0),
+                       "thigh.R": (-20, 0, 0), "shin.R": (30, 0, 0)}),
+        0.75: _pose(**{"arm.L": (-22, 0, 10), "arm.R": (-22, 0, -10), "chest": (30, 0, 0), "head": (6, 0, 0),
+                       "root": {"rot": (0, 0, 0), "loc": (0, -0.08, -0.03)}, "thigh.L": (-30, 0, 0), "shin.L": (35, 0, 0),
+                       "thigh.R": (-20, 0, 0), "shin.R": (30, 0, 0)}),
+        1.0: _sl,
+    }, loop=False)
+    set_interp(_act, 0.45, "LINEAR", 1.1)   # the smash is a drop, not a glide
+
+# ---- spell-casters / support (staff kind). EXTRA=cast,heal,raise picks which ones a model gets.
+#   Staff along the arm bone, tip above the hand: arm.R loc -Y lifts it, X+ tips the tip forward at the enemy.
+EXTRA = [e for e in os.environ.get("EXTRA", "").split(",") if e]
+_Z = {"root": {"rot": (0, 0, 0), "loc": (0, 0, 0)}, "arm.L": (0, 0, 0), "arm.R": {"rot": (0, 0, 0), "loc": (0, 0, 0)},
+      "chest": (0, 0, 0), "head": (0, 0, 0), "thigh.L": (0, 0, 0), "shin.L": (0, 0, 0), "thigh.R": (0, 0, 0)}
+def _P(**kw):
+    p = dict(_Z); p.update(kw); return p
+if "cast" in EXTRA:
+    # raise the staff high and gather (left hand up beside it), then thrust the tip at the enemy.
+    # The spell leaves at 0.55 of 1.4 s = 0.77 s; the game time-scales the clip so that lands on the unit's windup.
+    _act = make_action("cast", 1.4, {
+        0.0: _Z,
+        0.22: _P(**{"arm.R": {"rot": (-15, 0, -8), "loc": (0, -0.12, 0)}, "arm.L": (-120, 0, 30), "chest": (-10, 0, -6),
+                    "head": (-12, 0, 0), "root": {"rot": (0, 0, -12), "loc": (0, 0.05, 0)}}),
+        0.45: _P(**{"arm.R": {"rot": (-22, 0, -8), "loc": (0, -0.14, 0)}, "arm.L": (-130, 0, 30), "chest": (-12, 0, -8),
+                    "head": (-14, 0, 0), "root": {"rot": (0, 0, -15), "loc": (0, 0.06, 0)}}),
+        0.55: _P(**{"arm.R": {"rot": (40, 0, 0), "loc": (0, -0.08, 0)}, "arm.L": (-60, 0, 15), "chest": (-16, 0, 6),
+                    "head": (-6, 0, 0), "root": {"rot": (0, 0, 8), "loc": (0, -0.14, 0)}, "thigh.L": (-40, 0, 0), "shin.L": (25, 0, 0), "thigh.R": (22, 0, 0)}),
+        0.75: _P(**{"arm.R": {"rot": (42, 0, 0), "loc": (0, -0.08, 0)}, "arm.L": (-55, 0, 15), "chest": (-16, 0, 6),
+                    "head": (-6, 0, 0), "root": {"rot": (0, 0, 8), "loc": (0, -0.14, 0)}, "thigh.L": (-40, 0, 0), "shin.L": (25, 0, 0), "thigh.R": (22, 0, 0)}),
+        1.0: _Z,
+    }, loop=False)
+    set_interp(_act, 0.45, "LINEAR", 1.4)
+if "heal" in EXTRA:
+    # lift the staff and open the free hand to the sky, then plant the staff: the light spreads from it
+    make_action("heal", 1.3, {
+        0.0: _Z,
+        0.3: _P(**{"arm.R": {"rot": (-10, 0, -6), "loc": (0, -0.14, 0)}, "arm.L": (-140, 0, 35), "chest": (-10, 0, 0), "head": (-22, 0, 0)}),
+        0.5: _P(**{"arm.R": {"rot": (-10, 0, -6), "loc": (0, -0.15, 0)}, "arm.L": (-145, 0, 38), "chest": (-12, 0, 0), "head": (-24, 0, 0)}),
+        0.62: _P(**{"arm.R": {"rot": (0, 0, 0), "loc": (0, 0.01, 0)}, "arm.L": (-50, 0, 45), "chest": (8, 0, 0), "head": (6, 0, 0),
+                    "root": {"rot": (0, 0, 0), "loc": (0, 0, -0.02)}}),
+        0.8: _P(**{"arm.R": {"rot": (0, 0, 0), "loc": (0, 0, 0)}, "arm.L": (-45, 0, 45), "chest": (6, 0, 0), "head": (4, 0, 0),
+                   "root": {"rot": (0, 0, 0), "loc": (0, 0, -0.02)}}),
+        1.0: _Z,
+    }, loop=False)
+if "raise" in EXTRA:
+    # reach the bony hand out low over the ground, then drag it upward (the dead rise with it), staff held high
+    make_action("raise", 1.4, {
+        0.0: _Z,
+        0.25: _P(**{"arm.L": (-45, 0, 10), "arm.R": {"rot": (-8, 0, -6), "loc": (0, -0.08, 0)}, "chest": (22, 0, 0), "head": (16, 0, 0),
+                    "thigh.L": (-30, 0, 0), "shin.L": (30, 0, 0), "root": {"rot": (0, 0, 0), "loc": (0, -0.04, -0.03)}}),
+        0.4: _P(**{"arm.L": (-40, 0, 12), "arm.R": {"rot": (-8, 0, -6), "loc": (0, -0.08, 0)}, "chest": (24, 0, 0), "head": (18, 0, 0),
+                   "thigh.L": (-30, 0, 0), "shin.L": (30, 0, 0), "root": {"rot": (0, 0, 0), "loc": (0, -0.04, -0.03)}}),
+        0.7: _P(**{"arm.L": (-120, 0, 20), "arm.R": {"rot": (-15, 0, -8), "loc": (0, -0.15, 0)}, "chest": (-14, 0, 0), "head": (-20, 0, 0),
+                   "root": {"rot": (0, 0, 0), "loc": (0, 0.02, 0.02)}}),
+        0.85: _P(**{"arm.L": (-125, 0, 22), "arm.R": {"rot": (-15, 0, -8), "loc": (0, -0.15, 0)}, "chest": (-15, 0, 0), "head": (-22, 0, 0),
+                    "root": {"rot": (0, 0, 0), "loc": (0, 0.02, 0.02)}}),
+        1.0: _Z,
+    }, loop=False)
+
 rig.animation_data.action = None
 for b in pb:
     b.rotation_euler = (0, 0, 0); b.location = (0, 0, 0)
@@ -691,6 +791,9 @@ if RENDER:
              ("idle_tap", "idle_tap", 0.35), ("laugh", "laugh", 0.15), ("fear", "fear", 0.0), ("rally", "rally", 0.35),
              ("rally_point", "rally", 0.75), ("cheer2", "cheer2", 0.5)]
     if bpy.data.actions.get("ready"): shots.append(("ready", "ready", 0.0))
+    for _c, _fr in (("slam", (0.45, 0.6)), ("cast", (0.45, 0.6)), ("heal", (0.5, 0.7)), ("raise", (0.35, 0.8)), ("cheer", (0.2,))):
+        if _c != "cheer" and bpy.data.actions.get(_c) or (_c == "cheer" and KIND == "golem"):
+            shots += [(f"{_c}_{i}", _c, f) for i, f in enumerate(_fr)]
     if len(argv) > 6:   # frame-by-frame sequence of one clip, e.g. "attack2"
         shots = [(f"{c}_{i}", c, i / 7) for c in argv[6].split(",") for i in range(8)]   # one or more clips, comma separated
         cam.data.ortho_scale = 1.3

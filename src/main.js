@@ -383,14 +383,14 @@ class Game {
     if (u.team === "human") {
       const hurt = allies.filter((a) => a !== u && a.dist(u) < s.auraR && a.hp < a.maxHp * 0.9);
       if (!hurt.length && u.hp >= u.maxHp * 0.9) { u.abilityCd = 1; return; }
-      u.play(u.variant("heal", "cheer"), 0.12); this.sfx("heal"); this.pulse(u.pos.x, u.pos.z, s.auraR, 0xffe27a, 0.7);
+      u.play(u.actions.heal ? "heal" : "cheer", 0.12); this.sfx("heal"); this.pulse(u.pos.x, u.pos.z, s.auraR, 0xffe27a, 0.7, u.actions.heal ? 0.75 : 0);   // (staff planted at 0.8 s)
       for (const a of [...hurt, u]) { const h = Math.min(a.maxHp - a.hp, s.heal); a.hp += h; a.morale = Math.min(100, a.morale + 10); if (this.stats) this.stats[u.team].healed = (this.stats[u.team].healed || 0) + h; }
       u.abilityCd = s.ability;
     } else {
       const dead = this.units.filter((d) => !d.alive && d.team === u.team && !d.captain && d.type !== "monster" && !d.raised && (d.deadT ?? 0) < 12 && d.dist(u) < s.auraR + 1.5)
         .sort((a, b) => a.dist(u) - b.dist(u))[0];
       if (!dead) { u.abilityCd = 1; return; }
-      u.play(u.variant("raise", "cheer"), 0.12); this.sfx("raise"); this.pulse(dead.pos.x, dead.pos.z, 1.4, 0x9dff5a, 0.8);
+      u.play(u.actions.raise ? "raise" : "cheer", 0.12); this.sfx("raise"); this.pulse(dead.pos.x, dead.pos.z, 1.4, 0x9dff5a, 0.8, u.actions.raise ? 0.5 : 0);   // (as the hand comes up)
       dead.revive(s.raiseHp); u.abilityCd = s.raiseEvery;
       if (this.stats) this.stats[u.team].raised = (this.stats[u.team].raised || 0) + 1;
     }
@@ -423,15 +423,15 @@ class Game {
     return g;
   }
   // a short flash on the ground: an expanding ring (blast, heal, raise)
-  pulse(x, z, r, color, dur = 0.5) {
+  pulse(x, z, r, color, dur = 0.5, delay = 0) {   // delay: wait for the moment in the animation
     if (this.muted) return;
     const m = new THREE.Mesh(new THREE.RingGeometry(0.75, 1, 32), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide }));
     m.rotation.x = -Math.PI / 2; m.position.set(x, 0.06, z); this.scene.add(m);
-    (this.fx ??= []).push({ m, t: 0, dur, r });
+    m.visible = delay <= 0; (this.fx ??= []).push({ m, t: -delay, dur, r });
   }
   updateFx(dt) {
     for (const f of this.fx ?? []) {
-      f.t += dt; const k = Math.min(1, f.t / f.dur);
+      f.t += dt; if (f.t < 0) continue; f.m.visible = true; const k = Math.min(1, f.t / f.dur);
       f.m.scale.setScalar(0.2 + f.r * (0.2 + 0.8 * Math.sqrt(k))); f.m.material.opacity = 0.85 * (1 - k);
       if (k >= 1) { this.scene.remove(f.m); f.m.geometry.dispose(); f.m.material.dispose(); f.dead = true; }
     }
@@ -679,13 +679,14 @@ class Game {
   takeOver(dead) {
     dead.setPlayer(false);
     const mine = this.alive(dead.team);
-    let pool = mine.filter((x) => x.type === "soldier" || x.type === "archer");   // anyone, at random
-    if (!pool.length) pool = mine.filter((x) => x.type !== "monster" && x.type !== "support");   // (campaign armies may have neither)
-    if (!pool.length || SPECTATE || this.muted) return;
+    // random by KIND of unit first, then one of that kind: a lone golem is as likely as the whole archer line
+    const kinds = [...new Set(mine.map((x) => x.type))];
+    if (!kinds.length || SPECTATE || this.muted) return;
+    const kind = kinds[Math.floor(Math.random() * kinds.length)], pool = mine.filter((x) => x.type === kind);
     const next = pool[Math.floor(Math.random() * pool.length)];
     this.player = next; next.setPlayer(true); next.order = null; next.target = null;
     this.setupOrders();
-    this.popup(next, this.ui.takeOver[next.type] || this.ui.takeOver[next.ranged ? "archer" : "soldier"], "block");
+    this.popup(next, this.ui.takeOver[next.type === "support" ? `support_${next.team}` : next.type] || this.ui.takeOver[next.ranged ? "archer" : "soldier"], "block");
   }
   setupOrders() {
     const bar = $("orders"); bar.innerHTML = "";
@@ -787,7 +788,11 @@ class Game {
     this.flip = !this.flip;
     for (const u of this.flip ? this.units : [...this.units].reverse()) {
       let desired;
-      if (u.isPlayer) desired = this.playerControl(inp);
+      if (u.isPlayer) {
+        desired = this.playerControl(inp);
+        // a player cleric / necromancer: the aura works by itself (heal / raise when ready)
+        if (u.s.ability && u.abilityCd <= 0 && !u.busy() && !this.ended) this.supportAbility(u);
+      }
       else desired = this.ended ? new THREE.Vector3() : u.brain.update(dt, this.generals[u.team]);
       u.update(dt, desired);
     }

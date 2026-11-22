@@ -149,7 +149,9 @@ if HANG:
     gap, HANG_X = 0, -0.25
     for a, c in zip(xs, xs[1:]):
         if c - a > gap: gap, HANG_X = c - a, (a + c) / 2
-    def inw(co): return co.z < 0.45 and co.x < (HANG_X if co.z > 0.3 else max(HANG_X, -0.255))   # the axe head reaches in beside the boot
+    if os.environ.get("HANG_X"): HANG_X = float(os.environ["HANG_X"])   # manual override when the gap search misfires
+    HANG_LOW = float(os.environ.get("HANG_LOW", "-0.255"))   # below the hip: the outer edge of the boot
+    def inw(co): return co.z < 0.45 and co.x < (HANG_X if co.z > 0.3 else max(HANG_X, HANG_LOW))   # the axe head reaches in beside the boot
     bm = bmesh.new(); bm.from_mesh(me)
     wf = {f for f in bm.faces if all(inw(v.co) for v in f.verts)}
     cut = [e for e in bm.edges if len(e.link_faces) > 1 and len({f in wf for f in e.link_faces}) > 1]
@@ -340,13 +342,19 @@ if HANG_X is not None:
         if a != c: par[a] = c
     isl = {}
     for v in me.vertices: isl.setdefault(find(v.index), []).append(v)
-    n = 0
+    n = 0; crumbs = set()
     for vs_ in isl.values():
+        if len(vs_) < 40 and any(inw(v.co) for v in vs_):
+            crumbs.update(v.index for v in vs_); continue   # slivers the cut chipped off (boot / skirt edge): drop them
         if sum(1 for v in vs_ if inw(v.co)) > 0.6 * len(vs_):
             for v in vs_:
                 for g in groups.values(): g.remove([v.index])
                 groups["arm.R"].add([v.index], 1.0, "REPLACE"); n += 1
-    print("HANG_RIGID verts", n, "islands", len(isl))
+    print("HANG_RIGID verts", n, "islands", len(isl), "crumbs dropped", len(crumbs))
+    if crumbs:
+        bm = bmesh.new(); bm.from_mesh(me); bm.verts.ensure_lookup_table()
+        bmesh.ops.delete(bm, geom=[bm.verts[i] for i in crumbs], context="VERTS")
+        bm.to_mesh(me); bm.free()
 
 if os.environ.get("DUMP_ARM"):
     gi = groups["arm.R"].index

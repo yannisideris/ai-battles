@@ -166,7 +166,9 @@ class Game {
     for (const u of this.units) {
       const k = GALLERY_TYPES.indexOf(u.type), row = u.team === "human" ? 0 : 1;
       u.root.visible = !only || only === u.team;
-      u.pos.set((k - (n - 1) / 2) * 1.5, 0, only ? 0 : row ? -1.4 : 1.4); u.facing = 0;
+      // one team: two rows of six (fits a narrow window); both teams: one long row each
+      if (only) u.pos.set(((k % 6) - 2.5) * 1.3, 0, k < 6 ? -1.3 : 1.3); else u.pos.set((k - (n - 1) / 2) * 1.5, 0, row ? -1.4 : 1.4);
+      u.facing = 0;
       u.root.position.copy(u.pos); u.root.rotation.y = 0.5; u.hpBar.visible = false; u.ring.visible = false;
       const a = u.actions[clip] || u.actions.idle;
       for (const o of Object.values(u.actions)) o.stop();
@@ -175,7 +177,8 @@ class Game {
     const half = params.get("half");   // &half=0|1: only the first / second six types, closer
     if (half != null) for (const u of this.units) { const k = GALLERY_TYPES.indexOf(u.type); if ((k < 6) !== (half === "0")) u.root.visible = false; else u.root.position.x = u.pos.x = ((k % 6) - 2.5) * 1.5; }
     const far = half != null ? 0.5 : 1;
-    this.camera.position.set(0, (only ? 3.5 : 6) * far + 1, (only ? 16 : 18) * far); this.camera.lookAt(0, 0.6, 0);
+    if (only) this.camera.position.set(0, 4.5, 9 + 6 * Math.max(0, 1.2 - innerWidth / innerHeight));
+    else this.camera.position.set(0, 6 * far + 1, 18 * far); this.camera.lookAt(0, 0.6, 0);
     this.marker.visible = false; this.targetRing.visible = false;
     $("general-line").textContent = `gallery: ${clip}`;
     const loop = (now) => {
@@ -381,7 +384,7 @@ class Game {
       const hurt = allies.filter((a) => a !== u && a.dist(u) < s.auraR && a.hp < a.maxHp * 0.9);
       if (!hurt.length && u.hp >= u.maxHp * 0.9) { u.abilityCd = 1; return; }
       u.play(u.variant("heal", "cheer"), 0.12); this.sfx("heal"); this.pulse(u.pos.x, u.pos.z, s.auraR, 0xffe27a, 0.7);
-      for (const a of [...hurt, u]) { a.hp = Math.min(a.maxHp, a.hp + s.heal); a.morale = Math.min(100, a.morale + 10); }
+      for (const a of [...hurt, u]) { const h = Math.min(a.maxHp - a.hp, s.heal); a.hp += h; a.morale = Math.min(100, a.morale + 10); if (this.stats) this.stats[u.team].healed = (this.stats[u.team].healed || 0) + h; }
       u.abilityCd = s.ability;
     } else {
       const dead = this.units.filter((d) => !d.alive && d.team === u.team && !d.captain && d.type !== "monster" && !d.raised && (d.deadT ?? 0) < 12 && d.dist(u) < s.auraR + 1.5)

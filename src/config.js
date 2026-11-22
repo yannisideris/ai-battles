@@ -15,7 +15,7 @@ export const STATS = {
   // shieldbearer: tower shield - blocks most blows and arrows from the front, slow, weak blows
   shieldbearer: { hp: 160, speed: 2.1, range: 1.1, dmg: [3, 5], cooldown: 1.6, windup: 0.33, shield: 0.55, arrowBlock: 0.8, scale: 1.0 },
   // support: cleric heals + steadies the units around him; necromancer raises the fallen (ability every N s)
-  support: { hp: 85, speed: 2.4, range: 1.1, dmg: [3, 5], cooldown: 1.6, windup: 0.35, shield: 0, scale: 1.0, ability: 8, auraR: 4.5, heal: 14, raiseHp: 0.45, raiseEvery: 13 },
+  support: { hp: 85, speed: 2.4, range: 1.1, dmg: [3, 5], cooldown: 1.6, windup: 0.35, shield: 0, scale: 1.0, ability: 11, auraR: 4.0, heal: 8, raiseHp: 0.45, raiseEvery: 14 },
   // battle mage: slow area blast that breaks up tight formations, very little life
   mage: { hp: 55, speed: 2.4, range: 9, minRange: 2.4, dmg: [13, 19], cooldown: 5.5, windup: 1.0, shield: 0, scale: 1.0, ranged: "magic", splash: 1.9, soft: true,
           bashRange: 1.1, bashDmg: [2, 4], bashCooldown: 1.4, longShot: 99 },

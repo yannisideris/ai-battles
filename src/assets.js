@@ -119,8 +119,9 @@ function softenSkeletonCloth(root) {
     o.material.map = tex;
   });
 }
-// ?skelcolor=raw shows the models exactly as they came out of Pixal3D (for comparison)
-const SOFTEN = new URLSearchParams(location.search).get("skelcolor") !== "raw";
+// Off by default: side by side, the user preferred the models' own deeper colours (more depth in the cloth).
+// ?skelcolor=soft turns the correction on (kept for comparison).
+const SOFTEN = new URLSearchParams(location.search).get("skelcolor") === "soft";
 
 async function loadOne(url) {
   try { return await loader.loadAsync(url); } catch { return null; }

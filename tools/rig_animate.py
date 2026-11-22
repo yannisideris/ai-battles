@@ -290,6 +290,32 @@ if KIND != "archer" and KIND not in ("spearman", "staff"):   # the spear/staff h
             for g in ("head", "chest", "hips"): groups[g].remove([v.index])
             groups[lab[v.index]].add([v.index], 1.0, "REPLACE"); moved += 1
     print("WEAPON_TIP_FIX moved", moved)
+    if KIND == "golem":
+        # long hanging arms: the fingers reach down beside the thighs and got leg / hips weights, so they stayed
+        # behind and stretched into a strip when the arm went up. Same surface-distance test, against the body:
+        # whatever the hand reaches sooner than the hips / legs do belongs to the arm.
+        dist = [1e9] * len(me.vertices); lab = [None] * len(me.vertices); pq = []
+        for v in me.vertices:
+            w = wmap(v)
+            for side in ("L", "R"):
+                if w.get(f"arm.{side}", 0) > 0.99 and Z_HIP < v.co.z < Z_NECK: dist[v.index] = 0; lab[v.index] = f"arm.{side}"
+            if abs(v.co.x) < hip_hw * 0.5 and v.co.z < Z_HIP + 0.05: dist[v.index] = 0; lab[v.index] = "body"
+            if abs(v.co.x) < hip_hw * 1.1 and v.co.z < Z_KNEE: dist[v.index] = 0; lab[v.index] = "body"
+        for i, d in enumerate(dist):
+            if d == 0: heapq.heappush(pq, (0.0, i))
+        while pq:
+            d, i = heapq.heappop(pq)
+            if d > dist[i]: continue
+            for j, L in adj[i]:
+                if d + L < dist[j]: dist[j] = d + L; lab[j] = lab[i]; heapq.heappush(pq, (d + L, j))
+        moved = 0
+        for v in me.vertices:
+            w = wmap(v)
+            if lab[v.index] and lab[v.index].startswith("arm") and any(w.get(g, 0) > 0 for g in ("thigh.L", "thigh.R", "shin.L", "shin.R", "hips")) \
+                    and abs(v.co.x) > hip_hw * 0.9:
+                for g in groups.values(): g.remove([v.index])
+                groups[lab[v.index]].add([v.index], 1.0, "REPLACE"); moved += 1
+        print("HAND_FIX moved", moved)
 
 if SPEAR:
     # the spear is now its own loose piece(s): every island lying along the spear line goes rigidly to the right arm

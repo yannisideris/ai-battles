@@ -54,10 +54,16 @@ function toToon(root, outline) {
   for (const [parent, hull, src] of extra) { hull.position.copy(src.position); hull.quaternion.copy(src.quaternion); hull.scale.copy(src.scale); parent.add(hull); }
 }
 
-// The new skeleton models (Pixal3D) came out darker and more saturated in the cloth than the three original ones
-// (deep magenta instead of pink). Measured on the textures: originals ~ hue 338, saturation 0.69, value 0.64.
-// This pulls only the pink/magenta/red cloth pixels of a model towards those numbers (bone, metal, wood untouched).
-const SKEL_TARGET = { hue: 338, sat: 0.69, val: 0.64 };
+// The new skeleton models (Pixal3D) kept the drawings' deep magenta: more saturated than the original skeletons and
+// with dark painted shadows in the cloth, where the originals are pastel pink with almost no dark shading.
+// Fix on load: only the pink/magenta/red cloth pixels, matched to the original soldier + archer by their whole
+// distribution (quantile mapping of saturation and brightness), not just the average - so the dark shadows open up
+// too. Measured on the original textures (11 quantiles, 0%..100%):
+const SKEL_TARGET = {
+  S: [0.08, 0.125, 0.208, 0.359, 0.541, 0.656, 0.681, 0.719, 0.764, 0.804, 1],
+  V: [0.122, 0.431, 0.525, 0.604, 0.675, 0.729, 0.769, 0.796, 0.812, 0.839, 0.973],
+  hue: 338,
+};
 const SKEL_ORIGINALS = ["captain", "soldier", "archer"];
 function rgb2hsv(r, g, b) {
   const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
@@ -70,10 +76,18 @@ function hsv2rgb(h, s, v) {
   return [r + m, g + m, b + m];
 }
 const hueDist = (a, b) => { const d = Math.abs(a - b) % 360; return d > 180 ? 360 - d : d; };
-function clothWeight(h, s, v) {   // 0..1: how much this pixel is "team cloth"
-  const sw = Math.min(1, Math.max(0, (s - 0.25) / 0.15)), vw = Math.min(1, Math.max(0, (v - 0.1) / 0.1));
-  const hw = Math.min(1, Math.max(0, (60 - hueDist(h, 335)) / 15));   // within ~45 deg of magenta, soft edge
-  return sw * vw * hw;
+const clamp01 = (x) => Math.min(1, Math.max(0, x));
+function clothWeight(h, s, v, d) {   // 0..1: how much this pixel is "team cloth" (soft edges, so no seams)
+  return clamp01((s - 0.08) / 0.08) * clamp01((v - 0.1) / 0.06) * clamp01((d - 0.03) / 0.03) * clamp01((60 - hueDist(h, 335)) / 15);
+}
+// value -> its rank (0..1) in the sorted samples, then -> the target's value at that rank
+function quantileMap(sorted, target) {
+  const n = sorted.length;
+  return (x) => {
+    let lo = 0, hi = n; while (lo < hi) { const m = (lo + hi) >> 1; if (sorted[m] < x) lo = m + 1; else hi = m; }
+    const t = (lo / n) * 10, i = Math.min(9, Math.floor(t)), f = t - i;
+    return target[i] + (target[i + 1] - target[i]) * f;
+  };
 }
 function softenSkeletonCloth(root) {
   root.traverse((o) => {
@@ -82,20 +96,20 @@ function softenSkeletonCloth(root) {
     const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
     const cx = cv.getContext("2d", { willReadFrequently: true }); cx.drawImage(img, 0, 0);
     const id = cx.getImageData(0, 0, W, H), d = id.data;
-    // this model's own cloth average (weighted)
-    let n = 0, hs = 0, hc = 0, S = 0, V = 0;
+    // this model's own cloth distribution
+    const S = [], V = [];
     for (let i = 0; i < d.length; i += 16) {
-      const [h, s, v] = rgb2hsv(d[i] / 255, d[i + 1] / 255, d[i + 2] / 255), w = clothWeight(h, s, v); if (!w) continue;
-      n += w; hs += w * Math.sin(h * Math.PI / 180); hc += w * Math.cos(h * Math.PI / 180); S += w * s; V += w * v;
+      const r = d[i] / 255, g = d[i + 1] / 255, b = d[i + 2] / 255, [h, s, v] = rgb2hsv(r, g, b);
+      if (clothWeight(h, s, v, v - Math.min(r, g, b)) > 0.5) { S.push(s); V.push(v); }
     }
-    if (n < 50) return;
-    let mh = Math.atan2(hs, hc) * 180 / Math.PI; if (mh < 0) mh += 360;
-    const sK = SKEL_TARGET.sat / (S / n), vK = SKEL_TARGET.val / (V / n);
-    let dh = SKEL_TARGET.hue - mh; if (dh > 180) dh -= 360; if (dh < -180) dh += 360;
+    if (S.length < 200) return;
+    S.sort((x, y) => x - y); V.sort((x, y) => x - y);
+    const mapS = quantileMap(S, SKEL_TARGET.S), mapV = quantileMap(V, SKEL_TARGET.V);
     for (let i = 0; i < d.length; i += 4) {
-      const r = d[i] / 255, g = d[i + 1] / 255, b = d[i + 2] / 255, [h, s, v] = rgb2hsv(r, g, b), w = clothWeight(h, s, v);
-      if (!w) continue;
-      const [nr, ng, nb] = hsv2rgb((h + dh * 0.6 + 360) % 360, Math.min(1, s * sK), Math.min(1, v * vK));
+      const r = d[i] / 255, g = d[i + 1] / 255, b = d[i + 2] / 255, [h, s, v] = rgb2hsv(r, g, b);
+      const w = clothWeight(h, s, v, v - Math.min(r, g, b)); if (!w) continue;
+      let dh = SKEL_TARGET.hue - h; if (dh > 180) dh -= 360; if (dh < -180) dh += 360;
+      const [nr, ng, nb] = hsv2rgb((h + dh * 0.3 + 360) % 360, mapS(s), mapV(v));
       d[i] = 255 * (r + (nr - r) * w); d[i + 1] = 255 * (g + (ng - g) * w); d[i + 2] = 255 * (b + (nb - b) * w);
     }
     cx.putImageData(id, 0, 0);

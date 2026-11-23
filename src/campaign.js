@@ -1,5 +1,5 @@
 // Campaign: a random overmap of battles to the enemy castle, an army that carries over (veterans, coins, shop),
-// save slots and game over. Decisions in docs/campaign.md. The battle itself is the normal Game, started with
+// one autosave (after the shop) and a retry from the map after a defeat. Decisions in docs/campaign.md. The battle itself is the normal Game, started with
 // game.campaignBattle = { armies, terrain, spawn, kind, defendT }.
 import { CAPTAIN_TYPES, QUALITY, STATS } from "./config.js";
 import { unitPortraits, UnitPreview } from "./assets.js";
@@ -10,7 +10,6 @@ export const PRICE = { soldier: 20, archer: 25, spearman: 25, shieldbearer: 30, 
   captain: 100, captain_ranged: 100, captain_heavy: 110 };
 const SHOP = ["soldier", "archer", "spearman", "shieldbearer", "scout", "brute", "mage", "support", "monster", "captain", "captain_ranged", "captain_heavy"];
 export const MAX_FIELD = 16, MAX_CAPTAINS = 3;
-const SLOTS = ["auto", "1", "2", "3"];
 const KEY = (s) => `aib.campaign.${s}`;
 const COLS = 8;              // 0 = your camp, 1..6 battles, 7 = the enemy castle
 const TERRAINS = ["village", "forest", "open", "river", "graveyard", "ruins", "hills"];
@@ -28,7 +27,8 @@ const LIMIT = { monster: 1, support: 2, mage: 3 };
 
 const T = {
   el: {
-    title: "Εκστρατεία", newC: "Νέα εκστρατεία", load: "Φόρτωση", back: "Πίσω", empty: "κενή", auto: "Αυτόματη",
+    title: "Εκστρατεία", newC: "Νέα εκστρατεία", contC: "Συνέχεια", sure: "Σίγουρα; Νέος χάρτης", lost: "Ήττα",
+    lostSub: "Ο στρατός σου γυρίζει στον χάρτη, όπως ήταν πριν ξεκινήσει για τη μάχη.", toMap: "Στον χάρτη", load: "Φόρτωση", back: "Πίσω", empty: "κενή", auto: "Αυτόματη",
     slot: (s) => (s === "auto" ? "Αυτόματη" : `Θέση ${s}`), save: "Αποθήκευση", saved: "Αποθηκεύτηκε", menu: "Μενού",
     fight: "Μάχη!", army: "Στρατός", cont: "Συνέχεια", coins: "νομίσματα", battle: "μάχη",
     kinds: { normal: "Μάχη", ambush: "Ενέδρα", defend: "Υπεράσπιση", elite: "Ισχυρός εχθρός", castle: "Το κάστρο" },
@@ -49,7 +49,8 @@ const T = {
     },
   },
   en: {
-    title: "Campaign", newC: "New campaign", load: "Load", back: "Back", empty: "empty", auto: "Auto",
+    title: "Campaign", newC: "New campaign", contC: "Continue", sure: "Sure? New map", lost: "Defeat",
+    lostSub: "Your army goes back to the map, as it was before it set off for the battle.", toMap: "To the map", load: "Load", back: "Back", empty: "empty", auto: "Auto",
     slot: (s) => (s === "auto" ? "Autosave" : `Slot ${s}`), save: "Save", saved: "Saved", menu: "Menu",
     fight: "Battle!", army: "Army", cont: "Continue", coins: "coins", battle: "battle",
     kinds: { normal: "Battle", ambush: "Ambush", defend: "Defence", elite: "Strong enemy", castle: "The castle" },
@@ -180,23 +181,23 @@ export class Campaign {
   toMenu() { this.hide(); this.game.campaignBattle = null; document.getElementById("menu").classList.remove("hidden"); }
 
   openMenu() {
-    const t = this.t;
+    const t = this.t, m = this.readSave();
+    const info = m ? ` <small>${this.name(m.roster.find((e) => e.id === m.lead)?.type || "soldier", m.side)} · ${m.won} ${t.battle} · ${m.coins} ${t.coins}</small>` : "";
     this.show(`<h1>${t.title}</h1>
-      <button class="big" data-act="new">${t.newC}</button>
-      <h3>${t.load}</h3><div class="slots">${this.slotButtons("load")}</div>
+      ${m ? `<button class="big" data-act="cont">${t.contC}${info}</button>` : ""}
+      <button class="big ${m ? "camp" : ""}" data-act="new">${t.newC}</button>
       <button data-act="menu">${t.back}</button>`);
-    this.bind({ new: () => this.newCampaign(), menu: () => this.toMenu() });
+    this.bind({ cont: () => this.resume(), new: () => this.newCampaign(), menu: () => this.toMenu() });
   }
-  slotButtons(act) {
-    return SLOTS.map((s) => {
-      const m = this.readSlot(s);
-      if (act === "save" && s === "auto") return "";
-      const info = m ? `${this.name(m.lead ? m.roster.find((e) => e.id === m.lead)?.type || "captain" : "soldier", m.side)} · ${m.won} ${this.t.battle} · ${m.coins} ${this.t.coins}` : this.t.empty;
-      return `<button data-act="${act}" data-slot="${s}" ${act === "load" && !m ? "disabled" : ""}>${this.t.slot(s)} <small>${info}</small></button>`;
-    }).join("");
+  // one autosave: written when a new campaign starts and whenever you close the army / shop screen
+  readSave() { try { return JSON.parse(localStorage.getItem(KEY("auto"))); } catch { return null; } }
+  save() { try { localStorage.setItem(KEY("auto"), JSON.stringify(this.state)); } catch {} }
+  resume() {
+    const s = this.readSave(); if (!s) { this.newCampaign(); return; }
+    this.state = s; this.lastResult = null;
+    this.game.settings.side = s.side; this.game.settings.difficulty = s.difficulty;
+    this.mapScreen();
   }
-  readSlot(s) { try { return JSON.parse(localStorage.getItem(KEY(s))); } catch { return null; } }
-  writeSlot(s) { try { localStorage.setItem(KEY(s), JSON.stringify(this.state)); return true; } catch { return false; } }
 
   newCampaign() {
     const g = this.game, side = g.settings.side, seed = (Math.random() * 2 ** 31) | 0;
@@ -205,16 +206,9 @@ export class Campaign {
     const roster = [e(g.settings.captain || "captain"), ...Array.from({ length: 6 }, () => e("soldier")), ...Array.from({ length: 4 }, () => e("archer"))];
     this.state = { v: 1, seed, side, difficulty: g.settings.difficulty, coins: 80, won: 0, map: makeMap(seed), pos: 0, visited: [0],
       roster, nextId: nid, lead: roster[0].id };
-    this.lastResult = null;
+    this.lastResult = null; this.save();
     this.mapScreen();
   }
-  load(slot) {
-    const s = this.readSlot(slot); if (!s) return;
-    this.state = s; this.lastResult = null;
-    this.game.settings.side = s.side; this.game.settings.difficulty = s.difficulty;
-    this.mapScreen();
-  }
-
   node(id) { for (const c of this.state.map.cols) for (const n of c) if (n.id === id) return n; return null; }
   next() { return this.state.map.edges.filter(([a]) => a === this.state.pos).map(([, b]) => this.node(b)); }
   field() { return this.state.roster.filter((e) => e.field); }
@@ -239,9 +233,9 @@ export class Campaign {
         <div id="pawn" class="pawn ${s.side}" style="left:${me.x}%;top:${me.y}%"></div></div>
       <div id="nodeinfo"></div>
       <div class="bar"><button class="big" data-act="go">${t.fight}</button><button data-act="army">${t.army}</button>
-        <button data-act="save">${t.save}</button><button data-act="menu">${t.menu}</button></div>`);
+        <button data-act="restart">${t.newC}</button><button data-act="menu">${t.menu}</button></div>`);
     this.bind({ sel: (b) => { this.sel = Number(b.dataset.id); this.nodeInfo(); }, go: () => this.go(), army: () => this.campScreen(),
-      save: () => this.saveScreen(), menu: () => this.toMenu() });
+      restart: (b) => { if (b.dataset.sure) this.newCampaign(); else { b.dataset.sure = 1; b.textContent = t.sure; } }, menu: () => this.toMenu() });
     this.nodeInfo();
     // the map: the 3D diorama (?map=2d: the painted one, kept for comparing)
     const cv = document.getElementById("mapcv"), lead = s.roster.find((e) => e.id === s.lead)?.type || s.roster[0]?.type || "soldier";
@@ -271,11 +265,6 @@ export class Campaign {
   }
   enemy() { return this.state.side === "human" ? "skeleton" : "human"; }
 
-  saveScreen() {
-    const t = this.t;
-    this.show(`<h1>${t.save}</h1><div class="slots">${this.slotButtons("save")}</div><button data-act="back">${t.back}</button>`);
-    this.bind({ save: (b) => { this.writeSlot(b.dataset.slot); this.saveScreen(); this.flash(t.saved); }, back: () => this.mapScreen(this.sel) });
-  }
   flash(text) { const d = document.createElement("div"); d.className = "flash"; d.textContent = text; this.body.appendChild(d); setTimeout(() => d.remove(), 1200); }
 
   // ---------------------------------------------------------------- the army: results, shop, who goes into battle
@@ -313,7 +302,7 @@ export class Campaign {
         e.field = !e.field; this.fixLead(); this.campScreen();
       },
       lead: (b) => { const e = s.roster.find((x) => x.id === Number(b.dataset.id)); s.lead = e.id; e.field = true; this.campScreen(); },
-      cont: () => { if (!this.field().length) { this.flash(t.noField); return; } this.lastResult = null; this.mapScreen(); },
+      cont: () => { if (!this.field().length) { this.flash(t.noField); return; } this.lastResult = null; this.save(); this.mapScreen(); },
     });
     this.fillIcons();
     // the big turning model of the unit you point at (mouse) or are on (pad / keys)
@@ -381,7 +370,7 @@ export class Campaign {
   afterBattle(won, info) {
     const s = this.state, n = this.fighting; this.fighting = null;
     this.game.campaignBattle = null;
-    if (!won) { this.gameOver(); return; }
+    if (!won) { this.defeat(); return; }
     const alive = new Set(info.alive), fallen = [], promoted = [];
     for (const e of this.field()) {
       if (alive.has(e.id)) { if ((e.vet || 0) < 3) { e.vet = (e.vet || 0) + 1; promoted.push(e); } }
@@ -394,15 +383,13 @@ export class Campaign {
     s.coins += coins; s.won++; s.pos = n.id; s.visited.push(n.id);
     this.lastResult = { coins, base: n.reward, survivors: alive.size, surv, fast, fallen, promoted };
     if (n.kind === "castle") { this.victory(); try { localStorage.removeItem(KEY("auto")); } catch {} return; }
-    this.writeSlot("auto");
-    this.campScreen();
+    this.campScreen();   // (saved when you close it)
   }
-  gameOver() {
+  defeat() {
     const t = this.t;
-    this.show(`<h1>${t.over}</h1><p>${t.overSub(this.state.won)}</p>
-      <button class="big" data-act="again">${t.again}</button>
-      <h3>${t.load}</h3><div class="slots">${this.slotButtons("load")}</div><button data-act="menu">${t.menu}</button>`);
-    this.bind({ again: () => this.newCampaign(), menu: () => this.toMenu() });
+    this.show(`<h1>${t.lost}</h1><p>${t.lostSub}</p>
+      <button class="big" data-act="back">${t.toMap}</button><button data-act="again">${t.newC}</button>`);
+    this.bind({ back: () => this.resume(), again: () => this.newCampaign() });
   }
   victory() {
     const t = this.t;
@@ -413,7 +400,7 @@ export class Campaign {
 
   // ---------------------------------------------------------------- input: mouse, arrow keys, gamepad
   bind(acts) {
-    this.acts = { ...acts, load: (b) => this.load(b.dataset.slot) };
+    this.acts = acts;
     for (const b of this.body.querySelectorAll("button[data-act]")) b.onclick = () => this.acts[b.dataset.act]?.(b);
   }
   buttons() { return [...this.body.querySelectorAll("button:not([disabled])")]; }

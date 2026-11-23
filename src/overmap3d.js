@@ -119,6 +119,17 @@ export class MapDiorama {
     const water = new THREE.Mesh(new THREE.PlaneGeometry(BW, BD), new THREE.MeshToonMaterial({ color: 0x4f97c4, gradientMap: this.grad }));
     water.rotation.x = -Math.PI / 2; water.position.y = 0.1; this.scene.add(water);
 
+    // the river battles sit on a bridge: build those first, square across the river at the node; the roads end at
+    // its two ends and the node is its middle
+    this.nodeBridge = new Map(); this.bridges = [];
+    for (const n of nodes) {
+      if (n.terrain !== "river" || n.kind === "camp" || n.kind === "castle") continue;
+      const [x, z] = S(n);
+      let bi = 0, bd = 1e9; this.river.forEach((rp, k) => { const dd = (rp.x - x) ** 2 + (rp.z - z) ** 2; if (dd < bd) { bd = dd; bi = k; } });
+      const sp = this.span(bi), surf = (px, pz) => Math.max(this.height(px, pz), 0.12) + 0.03;
+      this.bridge(sp.a[0], sp.a[1], sp.b[0], sp.b[1], surf(...sp.a), surf(...sp.b), 0.24);
+      this.nodeBridge.set(n.id, sp); this.bridges.push(sp.c);
+    }
     // roads (walked: light; the ones you can take now: gold)
     for (const [a, b] of this.s.map.edges) {
       const A = this.byId.get(a), B = this.byId.get(b), walked = this.visited.has(a) && this.visited.has(b), live = a === this.s.pos && this.reach.has(b);
@@ -146,8 +157,14 @@ export class MapDiorama {
       if (n.terrain === "village") for (let i = 0; i < 5; i++) { const p = spot(1.4); if (p) this.house(...p); }
       if (n.terrain === "graveyard") for (let i = 0; i < 9; i++) { const p = spot(1.3); if (p) this.tomb(...p); }
       if (n.terrain === "ruins") for (let i = 0; i < 6; i++) { const p = spot(1.5); if (p) this.ruin(...p); }
-      if (n.terrain === "river") this.bridge(x, z);
     }
+  }
+  nodePos(n) { const b = this.nodeBridge?.get(n.id); return b ? b.c : S(n); }
+  // a bridge square across the river at river point bi, as long as the river is wide there
+  span(bi) {
+    const R = this.river, rp = R[bi], r0 = R[Math.max(0, bi - 2)], r1 = R[Math.min(R.length - 1, bi + 2)];
+    const fx = r1.x - r0.x, fz = r1.z - r0.z, fl = Math.hypot(fx, fz) || 1, half = this.riverWidth(bi / (R.length - 1)) * 0.95 + 0.12;
+    return { c: [rp.x, rp.z], a: [rp.x - (fz / fl) * half, rp.z + (fx / fl) * half], b: [rp.x + (fz / fl) * half, rp.z - (fx / fl) * half] };
   }
   nearNode(x, z, d) { return this.nodes.some((n) => { const [a, b] = S(n); return Math.hypot(a - x, b - z) < d; }); }
   onRoad(x, z, d) { return (this.roadPts || []).some((p) => (p.x - x) ** 2 + (p.y - z) ** 2 < d * d); }
@@ -200,11 +217,18 @@ export class MapDiorama {
   tent(x, z) { const t = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.42, 4), this.mat(0xf0e6cc)); t.rotation.y = this.r(); this.put(t, x, z, 0.2); }
   tomb(x, z) { const t = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.18, 0.05), this.mat(this.r() < 0.5 ? 0x9a9aa2 : 0x6e6a64)); t.rotation.y = (this.r() - 0.5) * 0.6; this.put(t, x, z, 0.08); }
   ruin(x, z) { const h = 0.15 + this.r() * 0.25, t = new THREE.Mesh(new THREE.BoxGeometry(0.4 + this.r() * 0.4, h, 0.09), this.mat(0xb3aa98)); t.rotation.y = this.r() * 3; this.put(t, x, z, h / 2 - 0.02); }
-  bridge(x, z) {
-    // across the river where it passes this node (lying along the road direction is not needed at this scale)
-    let best = this.river[0]; for (const p of this.river) if ((p.x - x) ** 2 + (p.z - z) ** 2 < (best.x - x) ** 2 + (best.z - z) ** 2) best = p;
-    const b = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.06, 1.2), this.mat(0x8b5a2b)); b.position.set(best.x, 0.3, best.z); b.castShadow = true; this.scene.add(b);
+  // a little wooden bridge: planks on a gentle arch, posts and a handrail on both sides
+  // a simple wooden bridge: one plank deck from (ax, az) to (bx, bz), lying along the road, its ends at the road's height
+  bridge(ax, az, bx, bz, h0, h1, w) {
+    const len = Math.hypot(bx - ax, bz - az);
+    const deck = new THREE.Mesh(new THREE.BoxGeometry(w + 0.08, 0.06, len), this.mat(0x8b5a2b));
+    deck.position.set((ax + bx) / 2, (h0 + h1) / 2 + 0.02, (az + bz) / 2);
+    deck.rotation.order = "YXZ"; deck.rotation.y = Math.atan2(bx - ax, bz - az); deck.rotation.x = -Math.atan2(h1 - h0, len);
+    deck.castShadow = true; deck.receiveShadow = true; this.scene.add(deck);
   }
+
+
+
   castle(x, z) {
     const g = new THREE.Group(), stone = this.mat(0xa9a296);
     const keep = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.8, 1.0), stone); keep.position.y = 0.4; g.add(keep);
@@ -217,20 +241,43 @@ export class MapDiorama {
     g.traverse((o) => { o.castShadow = true; }); this.put(g, x, z - 0.4);
   }
   road(A, B, color, w, lift) {
-    const [x1, z1] = S(A), [x2, z2] = S(B), mx = (x1 + x2) / 2, mz = (z1 + z2) / 2;
+    const end = (N, other) => {   // where the road meets node N: its bridge end on the road's side, or the node itself
+      const b = this.nodeBridge.get(N.id); if (!b) return S(N);
+      const [ox, oz] = this.nodePos(other);
+      return Math.hypot(b.a[0] - ox, b.a[1] - oz) < Math.hypot(b.b[0] - ox, b.b[1] - oz) ? b.a : b.b;
+    };
+    const [x1, z1] = end(A, B), [x2, z2] = end(B, A), mx = (x1 + x2) / 2, mz = (z1 + z2) / 2;
     const k = ((A.id * 7 + B.id * 13) % 11) / 11 - 0.5, nx = -(z2 - z1), nz = x2 - x1, l = Math.hypot(nx, nz) || 1;
     const curve = new THREE.QuadraticBezierCurve(new THREE.Vector2(x1, z1), new THREE.Vector2(mx + (nx / l) * k * 2.2, mz + (nz / l) * k * 2.2), new THREE.Vector2(x2, z2));
     const pts = curve.getSpacedPoints(30), verts = [], idx = [];
     (this.roadPts ??= []).push(...pts);
+    const surf = (x, z) => Math.max(this.height(x, z), 0.12) + lift;   // the road's surface height
+    // the road is not laid on the water: it stops at the banks, where the bridge takes over
+    const wet = pts.map((pt) => { const [rd, rt] = this.riverInfo(pt.x, pt.y); return rd < this.riverWidth(rt) * 0.9; });
     pts.forEach((p, i) => {
       const q = pts[Math.min(i + 1, pts.length - 1)], o = pts[Math.max(i - 1, 0)], dx = q.x - o.x, dz = q.y - o.y, d = Math.hypot(dx, dz) || 1;
       const sx = (-dz / d) * w / 2, sz = (dx / d) * w / 2;
-      for (const sgn of [-1, 1]) { const x = p.x + sx * sgn, z = p.y + sz * sgn; verts.push(x, Math.max(this.height(x, z), 0.12) + lift, z); }
-      if (i) { const b = (i - 1) * 2; idx.push(b, b + 1, b + 2, b + 1, b + 3, b + 2); }
+      for (const sgn of [-1, 1]) { const x = p.x + sx * sgn, z = p.y + sz * sgn; verts.push(x, surf(x, z), z); }
+      if (i && !wet[i] && !wet[i - 1]) { const b = (i - 1) * 2; idx.push(b, b + 1, b + 2, b + 1, b + 3, b + 2); }
     });
     const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3)); g.setIndex(idx); g.computeVertexNormals();
     const m = new THREE.Mesh(g, this.mat(color)); m.receiveShadow = true; this.scene.add(m);
-    (this.roads ??= new Map()).set(`${A.id}-${B.id}`, curve);
+    // the pawn walks the road plus the bridge to the node's middle where there is one
+    const walk = new THREE.CurvePath(), PA = this.nodePos(A), PB = this.nodePos(B), V = (q) => new THREE.Vector2(q[0], q[1]);
+    if (PA[0] !== x1 || PA[1] !== z1) walk.add(new THREE.LineCurve(V(PA), new THREE.Vector2(x1, z1)));
+    walk.add(curve);
+    if (PB[0] !== x2 || PB[1] !== z2) walk.add(new THREE.LineCurve(new THREE.Vector2(x2, z2), V(PB)));
+    (this.roads ??= new Map()).set(`${A.id}-${B.id}`, walk);
+    // one straight bridge per crossing, square across the river and only as long as the river is wide
+    for (let i = 0; i < pts.length; i++) {
+      if (!wet[i] || (i && wet[i - 1])) continue;
+      let e = i; while (e + 1 < pts.length && wet[e + 1]) e++;
+      const mid = pts[(i + e) >> 1];
+      let bi = 0, bd = 1e9; this.river.forEach((rp, k) => { const dd = (rp.x - mid.x) ** 2 + (rp.z - mid.y) ** 2; if (dd < bd) { bd = dd; bi = k; } });
+      const sp = this.span(bi); if (this.bridges.some(([bx, bz]) => Math.hypot(bx - sp.c[0], bz - sp.c[1]) < 1.1)) continue;
+      this.bridges.push(sp.c);
+      this.bridge(sp.a[0], sp.a[1], sp.b[0], sp.b[1], surf(...sp.a), surf(...sp.b), w);
+    }
   }
 
   // ---------------------------------------------------------------- the pawn: your leader, a little miniature
@@ -243,10 +290,11 @@ export class MapDiorama {
     this.mixer = new THREE.AnimationMixer(scene); this.clips = clips;
     this.actions = Object.fromEntries(clips.map((c) => [c.name, this.mixer.clipAction(c)]));
     this.actions.idle?.play();
-    const [x, z] = S(this.byId.get(this.s.pos));
+    const [x, z] = this.nodePos(this.byId.get(this.s.pos));
     this.pawn = scene; this.pawnAt(x, z); scene.rotation.y = Math.PI / 2; this.scene.add(scene);
   }
-  pawnAt(x, z) { this.pawn.position.set(x, this.height(x, z), z); }
+  pawnAt(x, z) { this.pawn.position.set(x, Math.max(this.height(x, z), this.onBridgeY(x, z)), z); }
+  onBridgeY(x, z) { return (this.bridges || []).some(([bx, bz]) => Math.hypot(bx - x, bz - z) < 0.75) ? 0.3 : 0; }
   // walk along the road to a node, then call done
   moveTo(node, done) {
     const curve = this.roads?.get(`${this.s.pos}-${node.id}`);
@@ -265,7 +313,7 @@ export class MapDiorama {
   }
   // where a node is on screen (for the HTML node buttons laid over the canvas)
   screenPos(n) {
-    const [x, z] = S(n), v = new THREE.Vector3(x, this.height(x, z) + 0.15, z).project(this.camera);
+    const [x, z] = this.nodePos(n), v = new THREE.Vector3(x, Math.max(this.height(x, z), 0.12) + 0.15, z).project(this.camera);
     return [(v.x + 1) / 2 * this.canvas.clientWidth, (1 - v.y) / 2 * this.canvas.clientHeight];
   }
   dispose() {

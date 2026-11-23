@@ -1,8 +1,8 @@
 // Campaign: a random overmap of battles to the enemy castle, an army that carries over (veterans, coins, shop),
 // save slots and game over. Decisions in docs/campaign.md. The battle itself is the normal Game, started with
 // game.campaignBattle = { armies, terrain, spawn, kind, defendT }.
-import { CAPTAIN_TYPES, QUALITY } from "./config.js";
-import { unitPortraits } from "./assets.js";
+import { CAPTAIN_TYPES, QUALITY, STATS } from "./config.js";
+import { unitPortraits, UnitPreview } from "./assets.js";
 import { drawMap } from "./overmap.js";
 
 export const PRICE = { soldier: 20, archer: 25, spearman: 25, shieldbearer: 30, scout: 25, brute: 45, mage: 45, support: 50, monster: 120,
@@ -70,6 +70,16 @@ const T = {
   },
 };
 const mmss = (t) => `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
+const ROLE = {
+  el: { soldier: "ο κορμός της γραμμής· ασπίδα, σταθερός", archer: "βέλη από μακριά· χωρίς πανοπλία", spearman: "μακριά λόγχη· σταματά όποιον ορμάει, αδύναμος στο πλάι",
+    shieldbearer: "τεράστια ασπίδα· σταματά βέλη από μπροστά", scout: "πολύ γρήγορος· κυνηγά τοξότες και μάγους", brute: "πολλή ζωή· χτυπά δύο μαζί",
+    mage: "έκρηξη σε περιοχή· πολύ λίγη ζωή", support: { human: "θεραπεύει και εμψυχώνει όσους είναι γύρω", skeleton: "σηκώνει ξανά τους πεσμένους" },
+    monster: "τεράστιο· πετά τους εχθρούς γύρω του · 1 ανά μάχη", captain: "αρχηγός· διαταγές, εμψυχώνει", captain_ranged: "αρχηγός που ρίχνει από μακριά", captain_heavy: "βαρύς αρχηγός· χτυπά δύο μαζί" },
+  en: { soldier: "the core of the line; shield, steady", archer: "arrows from afar; no armour", spearman: "long spear; stops chargers, weak on the flank",
+    shieldbearer: "huge shield; stops arrows from the front", scout: "very fast; hunts archers and mages", brute: "lots of life; hits two at once",
+    mage: "area blast; very little life", support: { human: "heals and steadies those around him", skeleton: "raises the fallen" },
+    monster: "huge; throws enemies around it · 1 per battle", captain: "leader; orders, morale", captain_ranged: "a leader who shoots", captain_heavy: "heavy leader; hits two at once" },
+};
 const ICON = { camp: "⛺", normal: "⚔", ambush: "🗡", defend: "🛡", elite: "💀", castle: "🏰" };
 
 function rng(seed) {   // mulberry32
@@ -270,7 +280,8 @@ export class Campaign {
       return `<button data-act="buy" data-type="${type}" ${no ? "disabled" : ""}><img class="ico" data-ico="${type}" alt="">${this.name(type)} <small>${PRICE[type]}</small></button>`;
     }).join("");
     this.show(`${res}<div class="maphead"><span><b>${s.coins}</b> ${t.coins}</span><span>${nField}/${MAX_FIELD} ${t.inField} · ${t.capMax}</span></div>
-      <h3>${t.shop}</h3><div class="shop">${shop}</div>
+      <h3>${t.shop}</h3><div class="shopwrap"><div class="shop">${shop}</div>
+        <div class="prev"><canvas id="unitprev"></canvas><div id="prevtxt"></div></div></div>
       <h3>${t.roster}</h3><div class="roster">${rows}</div>
       <button class="big" data-act="cont">${t.cont}</button>`);
     this.bind({
@@ -290,6 +301,25 @@ export class Campaign {
       cont: () => { if (!this.field().length) { this.flash(t.noField); return; } this.lastResult = null; this.mapScreen(); },
     });
     this.fillIcons();
+    // the big turning model of the unit you point at (mouse) or are on (pad / keys)
+    const cv = document.getElementById("unitprev");
+    if (cv) {
+      try { this.preview = new UnitPreview(cv, QUALITY[this.game.settings.quality] || QUALITY.medium); } catch (e) { console.warn("preview", e); }
+      for (const b of this.body.querySelectorAll("button")) b.addEventListener("mouseenter", () => this.previewFor(b));
+      this.previewType(this.prevType || "soldier");
+    }
+  }
+  previewFor(b) {
+    const type = b.dataset.type || b.closest(".unit")?.querySelector("img[data-ico]")?.dataset.ico;
+    if (type) this.previewType(type);
+  }
+  previewType(type) {
+    this.prevType = type;
+    const side = this.state.side, t = this.t, st = STATS[type], role = (ROLE[this.game.settings.lang] || ROLE.el)[type];
+    this.preview?.show(side, type, st.scale > 1.2 ? 0.92 : 1);
+    const box = document.getElementById("prevtxt");
+    if (box) box.innerHTML = `<b>${this.name(type)}</b> <small>${PRICE[type]}</small><br><i>${typeof role === "object" ? role[side] : role}</i><br>
+      <small>❤ ${st.hp} · ⚔ ${st.dmg[0]}-${st.dmg[1]}${st.ranged ? ` · 🎯 ${st.range}` : ""}</small>`;
   }
   // portraits from the real 3D models (rendered once, then cached)
   async fillIcons() {
@@ -380,6 +410,7 @@ export class Campaign {
     this.focus = (this.focus + d + bs.length) % bs.length; this.markFocus();
     const b = bs[this.focus]; b.scrollIntoView?.({ block: "nearest" });
     if (b.dataset.act === "sel") { this.sel = Number(b.dataset.id); this.nodeInfo(); }
+    if (this.preview && !this.preview.disposed) this.previewFor(b);
   }
   press() { const b = this.buttons()[this.focus]; if (b) b.click(); }
   setupPad() {

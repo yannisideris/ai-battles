@@ -197,3 +197,45 @@ export async function unitPortraits(quality, team, types) {
   }
   return Object.fromEntries(types.map((t) => [t, portraitCache[`${team}/${t}`]]));
 }
+
+// the shop's big turning model: one small renderer on its own canvas, idle animation, slow turn.
+// Stops (and frees its GPU context) as soon as the canvas leaves the page.
+export class UnitPreview {
+  constructor(canvas, quality) {
+    this.canvas = canvas; this.quality = quality;
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5)); this.renderer.setSize(canvas.clientWidth || 180, canvas.clientHeight || 220, false);
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.scene = new THREE.Scene();
+    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x8a9a6a, 2.2));
+    const sun = new THREE.DirectionalLight(0xfff1d6, 2.4); sun.position.set(1.5, 3, 3); this.scene.add(sun);
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(0.55, 40), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25 }));
+    disc.rotation.x = -Math.PI / 2; disc.position.y = 0.002; this.scene.add(disc);
+    this.camera = new THREE.PerspectiveCamera(32, (canvas.clientWidth || 180) / (canvas.clientHeight || 220), 0.1, 20);
+    this.camera.position.set(0, 0.8, 2.35); this.camera.lookAt(0, 0.58, 0);
+    this.last = performance.now(); this.want = null;
+    const loop = (now) => {
+      if (!this.canvas.isConnected) { this.dispose(); return; }
+      this.raf = requestAnimationFrame(loop);
+      const dt = Math.min(0.05, (now - this.last) / 1000); if (now - this.last < 30) return; this.last = now;   // ~30 fps is plenty
+      if (this.model) { this.mixer?.update(dt); this.model.rotation.y += dt * 0.7; }
+      this.renderer.render(this.scene, this.camera);
+    };
+    this.raf = requestAnimationFrame(loop);
+  }
+  async show(team, type, scale = 1) {
+    const key = `${team}/${type}`; if (this.want === key) return; this.want = key;
+    await loadUnitModels(this.quality, [[team, type]]);
+    if (this.want !== key || this.disposed) return;   // the player moved on meanwhile
+    if (this.model) this.scene.remove(this.model);
+    const { scene, clips } = spawnModel(team, type);
+    this.mixer = new THREE.AnimationMixer(scene);
+    const idle = clips.find((c) => c.name === "idle"); if (idle) this.mixer.clipAction(idle).play();
+    scene.scale.setScalar(scale); scene.rotation.y = this.model?.rotation.y ?? -0.4;
+    this.model = scene; this.scene.add(scene);
+  }
+  dispose() {
+    if (this.disposed) return; this.disposed = true; cancelAnimationFrame(this.raf);
+    this.renderer.dispose(); this.renderer.forceContextLoss?.();
+  }
+}

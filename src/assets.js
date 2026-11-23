@@ -167,3 +167,33 @@ export function spawnModel(team, type) {
   const scene = SkeletonUtils.clone(t.scene);
   return { scene, clips: t.clips };
 }
+
+// small portraits of the unit models (shop / army screens): rendered once from the real models, cached as images
+const portraitCache = {};
+let pr = null;
+export async function unitPortraits(quality, team, types) {
+  const need = types.filter((t) => !portraitCache[`${team}/${t}`]);
+  if (need.length) {
+    await loadUnitModels(quality, need.map((t) => [team, t]));
+    if (!pr) {
+      pr = { renderer: new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true }), scene: new THREE.Scene(),
+        camera: new THREE.PerspectiveCamera(30, 1, 0.1, 20) };
+      pr.renderer.setSize(128, 128, false); pr.renderer.outputColorSpace = THREE.SRGBColorSpace;
+      pr.scene.add(new THREE.HemisphereLight(0xffffff, 0x8a9a6a, 2.4));
+      const sun = new THREE.DirectionalLight(0xfff1d6, 2.6); sun.position.set(1, 2.5, 3); pr.scene.add(sun);
+    }
+    for (const t of need) {
+      const { scene, clips } = spawnModel(team, t);
+      const mixer = new THREE.AnimationMixer(scene), idle = clips.find((c) => c.name === "idle");
+      if (idle) { mixer.clipAction(idle).play(); mixer.update(0.4); }
+      scene.rotation.y = -0.45; pr.scene.add(scene); scene.updateMatrixWorld(true);
+      // frame the head and upper body (chibi: the face is what tells them apart)
+      const h = new THREE.Box3().setFromObject(scene).max.y || 1;   // (golem / brute are bigger)
+      pr.camera.position.set(0, h * 0.78, 1.55 * h); pr.camera.lookAt(0, h * 0.6, 0);
+      pr.renderer.render(pr.scene, pr.camera);
+      portraitCache[`${team}/${t}`] = pr.renderer.domElement.toDataURL("image/png");
+      pr.scene.remove(scene); mixer.stopAllAction();
+    }
+  }
+  return Object.fromEntries(types.map((t) => [t, portraitCache[`${team}/${t}`]]));
+}

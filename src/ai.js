@@ -87,15 +87,17 @@ export class General {
     const sol = this.order.filter((u) => u.line), arc = this.order.filter((u) => !u.line);
     sol.forEach((u, i) => place(u, (i - (sol.length - 1) / 2) * 1.35 * (sol.length > 8 ? 0.9 : 1), 0));
     arc.forEach((u, i) => place(u, (i - (arc.length - 1) / 2) * 1.7, 3.2));
-    const cap = mine.find((u) => u.captain);
+    // the commander behind the middle; heroes (other captains) behind the line to either side
+    const caps = mine.filter((u) => u.captain), cap = lead(mine);
     if (cap) place(cap, 0, cap.ranged ? 2.6 : 1.6);
+    caps.filter((u) => u !== cap).forEach((u, i) => place(u, (i % 2 ? 1 : -1) * (2.6 + Math.floor(i / 2) * 2.2), u.ranged ? 2.6 : 1.2));
   }
 
   decide(mine, foes) {
     if (!foes.length) return;
     const power = (us) => us.reduce((s, u) => s + u.hp * (u.ranged ? 1.2 : 1) * (0.5 + u.morale / 200), 0);
     const ratio = power(mine) / Math.max(1, power(foes));
-    const captain = mine.find((u) => u.captain);
+    const captain = lead(mine);
     const avgMorale = mine.reduce((s, u) => s + u.morale, 0) / mine.length;
     // focus the weakest valuable enemy that many of us can reach
     let best = null, bestScore = -1e9;
@@ -167,6 +169,9 @@ export class General {
 }
 
 function angDiffA(a, b) { let d = a - b; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return d; }
+// who leads a side: the commander (the player's captain, or the first AI captain); otherwise any captain left
+export function lead(list) { return list.find((u) => u.commander && u.alive) || list.find((u) => u.captain && u.alive) || null; }
+const HERO_R = 2.5;   // a hero steadies only the units right beside him
 function centroid(units) {
   if (!units.length) return { x: 0, z: 0 };
   let x = 0, z = 0; for (const u of units) { x += u.pos.x; z += u.pos.z; }
@@ -221,8 +226,16 @@ export class Brain {
     const u = this.u, g = u.game, foes = g.alive(g.enemyOf(u.team));
     if (!foes.length) { this.goal = null; return; }
     const allies = g.alive(u.team);
-    const captain = allies.find((a) => a.captain && a !== u);
-    if (captain && u.dist(captain) < 5) u.morale = Math.min(100, u.morale + 2.5 * u.trait.discipline);
+    const captain = lead(allies.filter((a) => a !== u));
+    // morale aura: the commander steadies everyone near him; a hero (another captain) only those right beside him,
+    // and less. They do not add up: the strongest one counts.
+    let aura = 0;
+    for (const a of allies) {
+      if (!a.captain || a === u) continue;
+      const d = u.dist(a);
+      aura = Math.max(aura, a.commander ? (d < 5 ? 1 : 0) : d < HERO_R ? 0.25 + 0.35 * (1 - d / HERO_R) : 0);
+    }
+    if (aura) u.morale = Math.min(100, u.morale + 2.5 * aura * u.trait.discipline);
     // catching your breath: away from the enemy, morale slowly recovers (less without a captain)
     if (foes.every((f) => u.dist(f) > 10)) u.morale = Math.min(captain ? 100 : 60, u.morale + 0.45 * u.trait.discipline);
 
@@ -365,7 +378,7 @@ export class Brain {
     if (u.ranged) return this.archerGoal(best, plan, general);
     if (u.type === "support") return this.supportGoal(general);
     // an AI captain who is badly hurt steps back behind the line while there is still a line to hide behind
-    if (u.captain && !u.isPlayer && u.hpFrac() < 0.4 && allies.filter((x) => x.line).length > 3) {
+    if (u.commander && !u.isPlayer && u.hpFrac() < 0.4 && allies.filter((x) => x.line).length > 3) {
       const { dir } = general.axes();
       this.goal = { x: general.anchor.x - dir.x * 4.5, z: general.anchor.z - dir.y * 4.5, tol: 0.8, run: 1.1 }; this.engaged = false; return;
     }
@@ -373,7 +386,7 @@ export class Brain {
     // ---- melee: march in formation until the enemy is close, then engage
     // mop-up: with only a couple of enemies left (or no soldiers of our own) even a careful captain goes in
     const mopUp = foes.length <= 2 || !allies.some((a) => a.line);
-    const engageR = g.endgame ? 999 : mopUp ? 30 : ord.charge ? 14 : (u.s.engage ?? (u.captain ? 3.0 : 5.5));
+    const engageR = g.endgame ? 999 : mopUp ? 30 : ord.charge ? 14 : (u.s.engage ?? (u.commander ? 3.0 : 5.5));
     this.engaged = nearest < engageR || (this.engaged && nearest < 9);
     const flanker = general.flankers.has(u);
     if (flanker && !this.flankReached && best && plan.flank) {

@@ -6,6 +6,7 @@ import { Unit, rint, angDiff, HEAVY_CHARGE } from "./unit.js";
 import { Input } from "./input.js";
 import { General, Brain, ORDERS } from "./ai.js";
 import { LINES, UI } from "./lines.js";
+import { Campaign } from "./campaign.js";
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -29,6 +30,8 @@ class Game {
     this.running = false;
     try { speechSynthesis.getVoices(); speechSynthesis.addEventListener("voiceschanged", () => speechSynthesis.getVoices()); } catch {}   // start loading the voice list early
     this.setupMenu();
+    this.campaign = new Campaign(this);
+    $("campaign").onclick = () => this.campaign.openMenu();
   }
 
   setupMenu() {
@@ -62,10 +65,11 @@ class Game {
     const mark = () => {
       rows.forEach((r, i) => r.classList.toggle("rowfocus", i === row));
       $("start").classList.toggle("padfocus", row === rows.length);
+      $("campaign").classList.toggle("padfocus", row === rows.length + 1);
     };
     const move = (dr, dc) => {
       document.body.classList.add("padnav");
-      if (dr) { row = (row + dr + rows.length + 1) % (rows.length + 1); mark(); }
+      if (dr) { row = (row + dr + rows.length + 2) % (rows.length + 2); mark(); }
       if (dc && row < rows.length) {
         const bs = [...rows[row].querySelectorAll("button")], i = bs.findIndex((b) => b.classList.contains("sel"));
         bs[Math.max(0, Math.min(bs.length - 1, i + dc))].click();
@@ -75,7 +79,7 @@ class Game {
     const confirm = () => {
       document.body.classList.add("padnav");
       if (!$("end").classList.contains("hidden")) $("again").click();
-      else if (!$("menu").classList.contains("hidden")) { if (row === rows.length) $("start").click(); else { row = rows.length; mark(); } }
+      else if (!$("menu").classList.contains("hidden")) { if (row === rows.length) $("start").click(); else if (row === rows.length + 1) $("campaign").click(); else { row = rows.length; mark(); } }
     };
     const menuOpen = () => !$("menu").classList.contains("hidden") || !$("end").classList.contains("hidden");
     addEventListener("keydown", (e) => {
@@ -115,6 +119,9 @@ class Game {
     this.ui = UI[this.settings.lang];
     $("help").textContent = this.ui.help;
     this.spoke = { foe: -99, ally: -99 }; this.recent = {}; this.said = {}; this.ended = false;
+    // nothing said in the last battle carries over (bubbles are timed on the battle clock, which starts again at 0)
+    for (const b of this.bubbles ?? []) b.el?.remove();
+    this.bubbles = []; try { speechSynthesis.cancel(); } catch {}
     if (!this.renderer) {
       this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: this.settings.quality !== "low", powerPreference: "default" });
       this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -262,7 +269,9 @@ class Game {
         const i = list.findIndex((e, j) => e.type === type && !used.has(j)); used.add(i);
         const e = list[i] || { type };
         const sp = this.campaignBattle?.spawn?.[team];
-        const sx = sp ? sp.x + x * sp.right : x, sz = sp ? sp.z + dz * sp.back : TEAM[team].spawnZ + dir * dz;
+        // campaign spawn override: the line runs across the facing direction, dz = distance behind the front
+        const sx = sp ? sp.x + x * Math.cos(sp.facing) - dz * Math.sin(sp.facing) : x;
+        const sz = sp ? sp.z - x * Math.sin(sp.facing) - dz * Math.cos(sp.facing) : TEAM[team].spawnZ + dir * dz;
         const u = new Unit(this, team, type, sx + (Math.random() - 0.5) * 0.4, sz);
         if (sp) u.facing = sp.facing;
         if (e.vet) { u.vet = e.vet; u.maxHp = u.hp = Math.round(u.s.hp * (1 + 0.1 * e.vet)); u.dmgMul = 1 + 0.08 * e.vet; u.morale = 100; u.trait.bravery += 0.15 * e.vet; }
@@ -273,9 +282,23 @@ class Game {
       }
     }
     for (const u of this.units) if (u.team !== this.settings.side) { u.maxHp = u.hp = Math.round(u.maxHp * this.diff.hp); }
-    const role = this.settings.role === "captain" ? (u) => u.captain : (u) => u.type === this.settings.role;
-    const mine = this.units.filter((u) => u.team === this.settings.side && role(u));
-    this.player = mine[Math.floor(mine.length / 2)];
+    const side = this.settings.side, all = this.units.filter((u) => u.team === side);
+    if (this.campaignBattle) this.player = all.find((u) => u.entry?.lead);   // the leader you picked in the camp
+    else {
+      const role = this.settings.role === "captain" ? (u) => u.captain : (u) => u.type === this.settings.role;
+      const mine = all.filter(role);
+      this.player = mine[Math.floor(mine.length / 2)];
+    }
+    if (!this.player) {   // no captain in your army: you fight on as one of the others (random kind first)
+      const kinds = [...new Set(all.map((u) => u.type))], kind = kinds[Math.floor(Math.random() * kinds.length)];
+      const pool = all.filter((u) => u.type === kind); this.player = pool[Math.floor(Math.random() * pool.length)];
+    }
+    // one commander per side (gives orders, the big morale aura); any other captains are heroes
+    for (const team of ["human", "skeleton"]) {
+      const caps = this.units.filter((u) => u.team === team && u.captain);
+      const cmd = team === side && this.player.captain ? this.player : caps[0];
+      if (cmd) cmd.commander = true;
+    }
     this.player.setPlayer(!SPECTATE);
   }
 
@@ -329,9 +352,15 @@ class Game {
     if (killer) this.lastKillerTeam = killer.team;
     this.deathLines(u, killer);
     for (const a of this.alive(u.team)) if (a.dist(u) < 7) a.morale -= 12 / a.trait.bravery;
-    if (u.captain) {
-      for (const a of this.alive(u.team)) a.morale -= 35;
-      for (const a of this.alive(this.enemyOf(u.team))) a.morale = Math.min(100, a.morale + 25);
+    if (u.captain) {   // the commander's fall shakes everyone; a hero's less
+      const big = u.commander;
+      for (const a of this.alive(u.team)) a.morale -= big ? 35 : 15;
+      for (const a of this.alive(this.enemyOf(u.team))) a.morale = Math.min(100, a.morale + (big ? 25 : 10));
+      if (big) {
+        u.commander = false;
+        // an AI side: the next captain takes command (the player's side: see takeOver)
+        if (!u.isPlayer) { const next = this.alive(u.team).find((a) => a.captain); if (next) next.commander = true; }
+      }
     }
     if (u.isPlayer) this.takeOver(u);
     this.checkEnd();
@@ -340,26 +369,36 @@ class Game {
     // last side standing wins; no draws, no early "rout" ending
     for (const team of ["human", "skeleton"]) {
       const a = this.alive(team);
-      const routed = false;
       if (!a.length) {
         if (this.ended) return;
         // both sides wiped out in the same moment: whoever struck the last blow wins
         const loser = this.alive(this.enemyOf(team)).length ? team : this.enemyOf(this.lastKillerTeam || this.enemyOf(team));
-        const won = loser !== this.settings.side;
-        this.winner = this.enemyOf(loser);
-        if (won) { this.speak("ally", "win", { priority: true, force: true }); this.speak("foe", "lose", { priority: true, force: true }); }
-        else this.speak("foe", "win", { priority: true, force: true });
-        // winners jump for joy for a few seconds before the result screen
-        for (const u of this.alive(this.winner)) { u.celebrating = true; u.play(u.variant("cheer2", "cheer"), 0.2, 0.9 + Math.random() * 0.25); }
-        setTimeout(() => this.finish(won, routed), 3000);
-        this.ended = true; return;
+        this.endBattle(this.enemyOf(loser)); return;
       }
     }
+  }
+  endBattle(winner) {
+    if (this.ended) return;
+    const won = winner === this.settings.side, routed = false;
+    this.winner = winner;
+    if (won) { this.speak("ally", "win", { priority: true, force: true }); this.speak("foe", "lose", { priority: true, force: true }); }
+    else this.speak("foe", "win", { priority: true, force: true });
+    // winners jump for joy for a few seconds before the result screen
+    for (const u of this.alive(this.winner)) { u.celebrating = true; u.play(u.variant("cheer2", "cheer"), 0.2, 0.9 + Math.random() * 0.25); }
+    // the defenders who held out: the enemy stops where it is
+    if (won && this.campaignBattle?.kind === "defend") for (const u of this.alive(this.enemyOf(winner))) { u.target = null; }
+    setTimeout(() => this.finish(won, routed), this.muted ? 0 : 3000);
+    this.ended = true;
   }
   finish(won, routed) {
     if (!this.running) return;
     this.running = false;
     this.renderer.render(this.scene, this.camera);
+    if (this.campaignBattle) {
+      const alive = this.alive(this.settings.side).map((u) => u.entry?.id).filter((x) => x != null);
+      this.campaign.afterBattle(won, { alive, time: this.time });
+      return;
+    }
     $("end-title").textContent = won ? this.ui.victory : this.ui.defeat;
     $("again").textContent = this.settings.lang === "el" ? "Ξανά" : "Again";
     $("end-sub").textContent = won ? (routed ? this.ui.enemyRouted : this.ui.enemyWiped) : (routed ? this.ui.youRouted : this.ui.youWiped);
@@ -679,11 +718,17 @@ class Game {
   takeOver(dead) {
     dead.setPlayer(false);
     const mine = this.alive(dead.team);
-    // random by KIND of unit first, then one of that kind: a lone golem is as likely as the whole archer line
+    // another captain (hero) first: he becomes the commander, orders and all.
+    // Otherwise random by KIND of unit, then one of that kind: a lone golem is as likely as the whole archer line
     const kinds = [...new Set(mine.map((x) => x.type))];
     if (!kinds.length || SPECTATE || this.muted) return;
-    const kind = kinds[Math.floor(Math.random() * kinds.length)], pool = mine.filter((x) => x.type === kind);
-    const next = pool[Math.floor(Math.random() * pool.length)];
+    const caps = mine.filter((x) => x.captain);
+    let next;
+    if (caps.length) { next = caps[Math.floor(Math.random() * caps.length)]; for (const x of mine) x.commander = false; next.commander = true; }
+    else {
+      const kind = kinds[Math.floor(Math.random() * kinds.length)], pool = mine.filter((x) => x.type === kind);
+      next = pool[Math.floor(Math.random() * pool.length)];
+    }
     this.player = next; next.setPlayer(true); next.order = null; next.target = null;
     this.setupOrders();
     this.popup(next, this.ui.takeOver[next.type === "support" ? `support_${next.team}` : next.type] || this.ui.takeOver[next.ranged ? "archer" : "soldier"], "block");
@@ -775,6 +820,9 @@ class Game {
   }
   step(dt) {
     this.time += dt; this.lastDt = dt;
+    // campaign defence: hold out until the time is up
+    const cb = this.campaignBattle;
+    if (cb?.kind === "defend" && !this.ended && this.time >= cb.defendT && this.alive(this.settings.side).length) this.endBattle(this.settings.side);
     const inp = this.input.poll();
     // pause: Esc / Start / View, any time during a battle (Esc closes an open order selection first)
     if (!SIM && !this.ended && inp.pause && !(this.orderMenu && inp.menuCancel && !inp.startBtn)) { this.setPaused(true); return; }
@@ -841,7 +889,8 @@ class Game {
       $(`count-${team}`).textContent = a.length;
       $(`morale-${team}`).style.width = `${a.length ? a.reduce((s, u) => s + Math.max(0, u.morale), 0) / a.length : 0}%`;
     }
-    const s = Math.floor(this.time); $("clock").textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+    const cbd = this.campaignBattle?.kind === "defend" ? this.campaignBattle.defendT : 0;
+    const s = cbd ? Math.max(0, Math.ceil(cbd - this.time)) : Math.floor(this.time); $("clock").textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
     $("general-line").textContent = "";
     this.updateEdgeArrow();
   }

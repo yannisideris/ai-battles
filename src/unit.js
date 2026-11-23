@@ -7,6 +7,7 @@ export const HEAVY_CHARGE = 1.45;   // seconds in the raised stance before the h
 const PLAYER_CAPTAIN_DMG = 1.5;   // the player captain's sword (on top of full-damage quick swings)
 
 let nextId = 1;
+const KNOCK_AXIS = new THREE.Vector3(), KNOCK_Q = new THREE.Quaternion();
 const ONE_SHOT = new Set(["attack", "attack2", "attack3", "shoot", "shoot_turn", "hit", "cheer", "idle_look", "idle_tap", "laugh", "rally", "cast", "heal", "raise", "slam"]);
 const CLAMP = new Set(["death", "death_fwd", "death_back", "block"]);
 const BUSY = new Set(["attack", "attack2", "attack3", "shoot", "shoot_turn", "hit", "laugh", "rally", "cheer", "cast", "heal", "raise", "slam"]);
@@ -68,7 +69,7 @@ export class Unit {
     this.hpBar = makeBar(); this.hpBar.position.y = 1.25 * this.s.scale; this.root.add(this.hpBar);
   }
 
-  play(name, fade = 0.15, timeScale = 1) {
+  play(name, fade = 0.15, timeScale = 1, weight = 1) {   // weight < 1: a softer version (the rest is the standing pose)
     const a = this.actions[name]; if (!a) return;
     if (this.current === a && !ONE_SHOT.has(name)) { a.timeScale = timeScale; return; }
     // fade out EVERY other clip that still has weight: finished one-shots stay clamped on their last frame,
@@ -78,7 +79,7 @@ export class Unit {
       if (o !== a && o.enabled && o.isScheduled()) { o.fadeOut(fade); fadingOthers = true; }
     }
     a.reset(); a.timeScale = timeScale; a.enabled = true;
-    a.setEffectiveWeight(1);
+    a.setEffectiveWeight(weight);
     if (fadingOthers) a.fadeIn(fade);
     a.play(); this.current = a;
   }
@@ -266,7 +267,9 @@ export class Unit {
     if (!this.alive) return;
     const dx = this.pos.x - fromX, dz = this.pos.z - fromZ, d = Math.hypot(dx, dz) || 1;
     this.lungeDir.set(dx / d, 0, dz / d); this.lunge = 0.4; this.lungeSpeed = dist / 0.4;
-    this.air = { t: 0, dur: 0.45, h: 0.45 + dist * 0.12 }; this.stun = 0.9;
+    // a shove, not a hop: low arc, the body knocked back away from the blow, a stagger on landing
+    this.air = { t: 0, dur: 0.45, h: 0.1 + dist * 0.05, tilt: 0.45 + dist * 0.08 }; this.stun = 0.9;
+    this.current = null; this.play("hit", 0.05, 0.5);
     this.attackTimer = 0; this.pendingTarget = null; this.freshPending = false;
     if (this.charging) this.cancelCharge();
     this.play("hit", 0.05);
@@ -312,7 +315,8 @@ export class Unit {
       if (attacker.alive && !attacker.isPlayer && Math.random() < 0.35) setTimeout(() => attacker.react(attacker.team === "skeleton" ? "laugh" : "cheer"), 250);
       return dmg;
     }
-    if (!this.busy() && !this.charging && !this.heavy) this.play("hit", 0.05);
+    // a flinch, not a jolt: the hit clip at part weight (big bodies even less), a touch slower
+    if (!this.busy() && !this.charging && !this.heavy) this.play("hit", ...(this.type === "monster" ? [0.05] : [0.08, 0.8, this.s.scale > 1.2 ? 0.35 : 0.55]));   // (golem / colossus: unchanged)
     return dmg;
   }
   die(killer) {
@@ -412,11 +416,15 @@ export class Unit {
     if (speed > 0.3 && !(this.attackTimer > 0) && !(this.ranged && !this.isPlayer && this.busy())) this.wantFacing = Math.atan2(this.vel.x, this.vel.z);
     if (this.wantFacing !== undefined) this.facing += angDiff(this.wantFacing, this.facing) * Math.min(1, dt * (this.isPlayer ? 18 : 10));
     this.root.position.copy(this.pos);
-    if (this.air) {   // thrown by a slam: a short arc through the air
+    this.root.rotation.set(0, this.facing, 0);
+    if (this.air) {   // thrown by a slam: a short low arc, leaning back away from the blow
       this.air.t += dt; const k = Math.min(1, this.air.t / this.air.dur);
-      this.root.position.y = Math.sin(Math.PI * k) * this.air.h; if (k >= 1) this.air = null;
+      this.root.position.y = Math.sin(Math.PI * k) * this.air.h;
+      const lean = Math.sin(Math.PI * Math.min(1, k * 1.15)) * this.air.tilt;
+      KNOCK_AXIS.set(this.lungeDir.z, 0, -this.lungeDir.x).normalize();   // up x push: tips the top along the push
+      this.root.quaternion.premultiply(KNOCK_Q.setFromAxisAngle(KNOCK_AXIS, lean));
+      if (k >= 1) this.air = null;
     }
-    this.root.rotation.y = this.facing;
     const holdingBlock = this.current === this.actions.block && this.blocking > 0;
     const curName = this.current ? this.current.getClip().name : "";
     const flavourRunning = (curName === "idle_look" || curName === "idle_tap") && this.current.isRunning();

@@ -47,14 +47,35 @@ export class MapDiorama {
     const zs = nodes.map((n) => S(n)[1]);
     this.coast0 = Math.max(Math.max(...zs) + 1.7, BD / 2 - 3.4);
     const ph = [r() * 9, r() * 9, r() * 9];
-    this.coast = (x) => this.coast0 + Math.sin(x * 0.35 + ph[0]) * 0.5 + Math.sin(x * 0.9 + ph[1]) * 0.2;
+    this.bayX = null;
+    this.coast = (x) => this.coast0 + Math.sin(x * 0.35 + ph[0]) * 0.5 + Math.sin(x * 0.9 + ph[1]) * 0.2
+      - (this.bayX == null ? 0 : 0.6 * Math.exp(-(((x - this.bayX) / 2.8) ** 2)));   // a gentle bay at the river mouth
+    this.sandPh = [r() * 9, r() * 9, r() * 9];
     this.back = -BD / 2 + 2.2;
-    // the river: from the mountains, through the river battles (left to right), down to the sea
+    // the river: a spring pond in the wood at the back, meanders through the river battles (left to right),
+    // widening as it goes, and opens into a little estuary with sandbanks in a bay of the coast
     const riv = nodes.filter((n) => n.terrain === "river" && n.kind !== "camp" && n.kind !== "castle").sort((a, b) => a.x - b.x).map(S);
-    const x0 = riv.length ? riv[0][0] - 2.5 : (r() - 0.5) * 20;
-    const pts = [[x0, this.back - 1], ...riv.map(([x, z]) => [x + (r() - 0.5) * 0.8, z + (r() - 0.5) * 0.6])];
-    const lx = pts[pts.length - 1][0] + (r() - 0.5) * 4; pts.push([lx, this.coast(lx) + 1.5]);
-    this.river = new THREE.CatmullRomCurve3(pts.map(([x, z]) => new THREE.Vector3(x, 0, z)), false, "catmullrom", 0.5).getSpacedPoints(160);
+    const x0 = riv.length ? riv[0][0] - 2 + (r() - 0.5) * 2 : (r() - 0.5) * 20;
+    const src = [x0, -BD / 2 + 1.4];
+    const pts = [src, ...riv.map(([x, z]) => [x + (r() - 0.5) * 0.5, z + (r() - 0.5) * 0.4])];
+    const lx = pts[pts.length - 1][0] + (r() - 0.5) * 4;
+    this.bayX = lx; pts.push([lx, this.coast(lx) + 1.2]);
+    const course = new THREE.CatmullRomCurve3(pts.map(([x, z]) => new THREE.Vector3(x, 0, z)), false, "centripetal").getSpacedPoints(260);
+    // meanders: a sideways wave along the course, calm near the river battles (so it still passes their bridges)
+    const near = (p) => Math.min(9, ...riv.map(([x, z]) => Math.hypot(p.x - x, p.z - z)));
+    const mph = r() * 6, out = [];
+    course.forEach((p, i) => {
+      const q = course[Math.min(i + 1, course.length - 1)], o = course[Math.max(i - 1, 0)], dx = q.x - o.x, dz = q.z - o.z, d = Math.hypot(dx, dz) || 1;
+      const t = i / (course.length - 1), calm = smooth((near(p) - 0.6) / 2) * smooth(t / 0.08) * smooth((1 - t) / 0.12);
+      const a = Math.sin(t * 26 + mph) * 0.55 * calm + Math.sin(t * 61 + mph * 2) * 0.15 * calm;
+      out.push(new THREE.Vector3(p.x - (dz / d) * a, 0, p.z + (dx / d) * a));
+    });
+    this.river = new THREE.CatmullRomCurve3(out, false, "centripetal").getSpacedPoints(240);
+    this.src = src;
+    // sandbanks in the mouth (a small delta)
+    const m = this.river[this.river.length - 1], m2 = this.river[this.river.length - 12];
+    const ax = m.x - m2.x, az = m.z - m2.z, al = Math.hypot(ax, az) || 1;
+    this.banks = [[m.x - (ax / al) * 0.7, m.z - (az / al) * 0.7, 0.24]];
     // hills round the nodes that have them (the battle's high ground), a few more in the empty land
     this.bumps = [];
     for (const n of nodes) if (n.hills) {
@@ -71,9 +92,13 @@ export class MapDiorama {
       const x = pos.getX(i), z = pos.getZ(i), y = this.height(x, z); pos.setY(i, y);
       const n = Math.sin(x * 0.7) * Math.cos(z * 0.9) * 0.5 + Math.sin(x * 2.1 + z * 1.7) * 0.5;
       col.copy(grass).lerp(dry, 0.3 + n * 0.25);
-      const dc = this.coast(x) - z, dr = this.riverDist(x, z);
-      if (dc < 0.9) col.lerp(sand, smooth((0.9 - dc) / 0.6));
-      if (dr < 0.55) col.lerp(sand, smooth((0.55 - dr) / 0.3) * 0.6);
+      const dc = this.coast(x) - z, [rd, rt] = this.riverInfo(x, z), rw = this.riverWidth(rt);
+      const [p0, p1, p2] = this.sandPh;
+      const sw = 0.55 + 0.35 * Math.sin(x * 0.42 + p0) + 0.15 * Math.sin(x * 1.3 + p1);             // how far up the sand reaches
+      const soft = 0.08 + 0.5 * smooth(0.5 + 0.5 * Math.sin(x * 0.27 + p2));                         // sharp edge here, blurred there
+      if (dc < sw + soft) col.lerp(sand, smooth((sw + soft - dc) / (soft * 2)));
+      if (rd < rw + 0.35) col.lerp(sand, smooth((rw + 0.35 - rd) / 0.25) * (0.35 + 0.4 * rt));
+      if (this.banks.some(([bx, bz, br]) => Math.hypot(x - bx, z - bz) < br)) col.copy(sand);
       if (z < this.back + 1.5) col.lerp(grass, 0.4).offsetHSL(0, 0, -0.03);   // greener, darker woodland at the back
       cols.push(col.r, col.g, col.b);
     }
@@ -83,7 +108,7 @@ export class MapDiorama {
     // the board's earth sides (a diorama on the table)
     const base = new THREE.Mesh(new THREE.BoxGeometry(BW, 1.6, BD), this.mat(0x6b4f33)); base.position.y = -0.85; this.scene.add(base);
     // water: one sheet; the ground above it hides it except in the sea and the river bed
-    const water = new THREE.Mesh(new THREE.PlaneGeometry(BW, BD), new THREE.MeshToonMaterial({ color: 0x4f97c4, gradientMap: this.grad, transparent: true, opacity: 0.92 }));
+    const water = new THREE.Mesh(new THREE.PlaneGeometry(BW, BD), new THREE.MeshToonMaterial({ color: 0x4f97c4, gradientMap: this.grad }));
     water.rotation.x = -Math.PI / 2; water.position.y = 0.1; this.scene.add(water);
 
     // trees: forests round the forest battles + a few woods in the empty land (instanced: cheap)
@@ -96,7 +121,7 @@ export class MapDiorama {
     }
     for (let x = -BW / 2 + 0.6; x < BW / 2 - 0.4; x += 0.55) for (let k = 0; k < 2; k++) {   // the wood along the back edge
       const tx = x + (r() - 0.5) * 0.5, tz = -BD / 2 + 0.5 + r() * 1.6;
-      if (!this.nearNode(tx, tz, 1.4) && this.riverDist(tx, tz) > 0.55) trees.push([tx, tz, 0.8 + r() * 0.5]);
+      if (!this.nearNode(tx, tz, 1.4) && this.riverDist(tx, tz) > 0.55 && Math.hypot(tx - this.src[0], tz - this.src[1]) > 1.1) trees.push([tx, tz, 0.8 + r() * 0.5]);
     }
     for (let i = 0; i < 7; i++) { const x = (r() - 0.5) * BW * 0.9, z = this.back + 1.5 + r() * (this.coast0 - this.back - 3); if (!this.nearNode(x, z, 3)) wood(x, z, 1.6 + r() * 1.4, 14); }
     this.addTrees(trees);
@@ -117,13 +142,23 @@ export class MapDiorama {
     }
   }
   nearNode(x, z, d) { return this.nodes.some((n) => { const [a, b] = S(n); return Math.hypot(a - x, b - z) < d; }); }
-  okSpot(x, z, clear) { return z < this.coast(x) - 0.6 && this.riverDist(x, z) > 0.55 && !this.nearNode(x, z, clear) && Math.abs(x) < BW / 2 - 0.5 && z > -BD / 2 + 0.5; }
-  riverDist(x, z) { let d = 1e9; for (const p of this.river) d = Math.min(d, (p.x - x) ** 2 + (p.z - z) ** 2); return Math.sqrt(d); }
+  okSpot(x, z, clear) { return z < this.coast(x) - 0.6 && this.riverDist(x, z) > 0.55 && Math.hypot(x - this.src[0], z - this.src[1]) > 1.1 && !this.nearNode(x, z, clear) && Math.abs(x) < BW / 2 - 0.5 && z > -BD / 2 + 0.5; }
+  riverInfo(x, z) {
+    let d = 1e9, bi = 0; const R = this.river;
+    for (let i = 0; i < R.length; i += 3) { const e = (R[i].x - x) ** 2 + (R[i].z - z) ** 2; if (e < d) { d = e; bi = i; } }
+    for (let i = Math.max(0, bi - 3); i <= Math.min(R.length - 1, bi + 3); i++) { const e = (R[i].x - x) ** 2 + (R[i].z - z) ** 2; if (e < d) { d = e; bi = i; } }
+    return [Math.sqrt(d), bi / (R.length - 1)];
+  }
+  riverWidth(t) { return 0.16 + 0.26 * t + 0.75 * smooth((t - 0.86) / 0.14); }   // thin at the spring, wide at the mouth
+  riverDist(x, z) { const [d, t] = this.riverInfo(x, z); return d - this.riverWidth(t) + 0.3; }   // (~0 at the bank)
   height(x, z) {
     let y = 0.3 + Math.sin(x * 0.5) * Math.cos(z * 0.6) * 0.05;
     for (const [bx, bz, br, bh] of this.bumps) { const d = Math.hypot((x - bx) / br, (z - bz) / (br * 0.75)); if (d < 1.6) y += bh * Math.exp(-d * d * 1.6); }
     if (z < this.back + 1.5) y += smooth((this.back + 1.5 - z) / 2.5) * (0.35 + 0.2 * Math.sin(x * 0.6));   // gently rolling up at the back
-    const dr = this.riverDist(x, z); if (dr < 0.5) y = Math.min(y, 0.02 + (y - 0.02) * smooth(dr / 0.5));   // river bed
+    const [rd, rt] = this.riverInfo(x, z), rw = this.riverWidth(rt);
+    if (rd < rw + 0.3) y = Math.min(y, 0.02 + (y - 0.02) * smooth((rd - rw * 0.55) / (rw * 0.45 + 0.3)));    // river bed
+    const sd = Math.hypot(x - this.src[0], z - this.src[1]); if (sd < 0.95) y = Math.min(y, 0.02 + (y - 0.02) * smooth((sd - 0.45) / 0.5));   // the spring pond
+    for (const [bx, bz, br] of this.banks) { const d = Math.hypot(x - bx, z - bz) / br; if (d < 1) y = Math.max(y, 0.16 * (1 - d * d)); }   // sandbanks
     const dc = z - this.coast(x); if (dc > -0.3) y = Math.min(y, 0.3 - smooth((dc + 0.3) / 0.9) * 0.55);    // beach into the sea
     return y;
   }

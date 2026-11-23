@@ -66,7 +66,7 @@ export class MapDiorama {
     // ground (with the sea floor and the river bed carved in)
     const geo = new THREE.PlaneGeometry(BW, BD, 168, 84); geo.rotateX(-Math.PI / 2);
     const pos = geo.attributes.position, cols = [], col = new THREE.Color();
-    const sand = new THREE.Color(0xe3d29a), grass = new THREE.Color(0x8fbf5c), dry = new THREE.Color(0xb9c27a), rock = new THREE.Color(0x9a9282);
+    const sand = new THREE.Color(0xe3d29a), grass = new THREE.Color(0x8fbf5c), dry = new THREE.Color(0xb9c27a), rock = new THREE.Color(0x8f7458);
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i), z = pos.getZ(i), y = this.height(x, z); pos.setY(i, y);
       const n = Math.sin(x * 0.7) * Math.cos(z * 0.9) * 0.5 + Math.sin(x * 2.1 + z * 1.7) * 0.5;
@@ -86,14 +86,29 @@ export class MapDiorama {
     const water = new THREE.Mesh(new THREE.PlaneGeometry(BW, BD), new THREE.MeshToonMaterial({ color: 0x4f97c4, gradientMap: this.grad, transparent: true, opacity: 0.92 }));
     water.rotation.x = -Math.PI / 2; water.position.y = 0.1; this.scene.add(water);
 
-    // mountains along the back
-    const peak = this.mat(0x9a9282), snow = this.mat(0xf4f2ea);
-    for (let x = -BW / 2 + 0.8; x < BW / 2; x += 1.3 + r() * 1.4) {
-      const z = this.back - 0.6 + (r() - 0.5) * 1.6, hgt = 1.6 + r() * 1.8, rad = 1.0 + r() * 0.7;
-      if (this.nearNode(x, z, 2.2)) continue;
-      const m = new THREE.Mesh(new THREE.ConeGeometry(rad, hgt, 5), peak); m.position.set(x, this.height(x, z) + hgt / 2 - 0.1, z); m.rotation.y = r() * 3;
-      m.castShadow = true; this.scene.add(m);
-      if (hgt > 2.5) { const c = new THREE.Mesh(new THREE.ConeGeometry(rad * 0.38, hgt * 0.38, 5), snow); c.position.set(x, m.position.y + hgt * 0.31, z); c.rotation.y = m.rotation.y; this.scene.add(c); }
+    // mountains along the back: brown, rounded rocky masses in clusters (a big one, smaller ones round it, foothills)
+    const browns = [0x8a6a48, 0x7d5f40, 0x96764f, 0x6f5338].map((c) => this.mat(c));
+    const lump = (x, z, rad, hgt) => {
+      const g = new THREE.DodecahedronGeometry(1, 1), p = g.attributes.position;
+      const kk = new Map();
+      for (let i = 0; i < p.count; i++) {   // knobbly: push each corner in or out a little (shared corners move together), flatten the underside
+        const key = `${p.getX(i).toFixed(3)},${p.getY(i).toFixed(3)},${p.getZ(i).toFixed(3)}`; if (!kk.has(key)) kk.set(key, 0.82 + r() * 0.3); const k = kk.get(key); p.setXYZ(i, p.getX(i) * k, Math.max(-0.25, p.getY(i)) * k, p.getZ(i) * k);
+      }
+      g.computeVertexNormals();
+      const m = new THREE.Mesh(g, browns[Math.floor(r() * browns.length)]);
+      m.scale.set(rad, hgt, rad * (0.75 + r() * 0.3)); m.rotation.y = r() * 3;
+      m.position.set(x, this.height(x, z) + hgt * 0.15, z); m.castShadow = true; m.receiveShadow = true; this.scene.add(m);
+    };
+    for (let x = -BW / 2 + 1.2; x < BW / 2 - 0.5; x += 2.6 + r() * 2.2) {
+      const z = this.back - 0.7 + (r() - 0.5) * 1.2;
+      if (this.nearNode(x, z, 2.4)) continue;
+      const big = 1.3 + r() * 0.6;
+      lump(x, z, 1.25 + r() * 0.5, big);                                              // the main mass
+      for (let k = 0; k < 2 + Math.floor(r() * 2); k++) {                             // smaller ones round it
+        const a = r() * Math.PI * 2, d = 0.9 + r() * 0.7, px = x + Math.cos(a) * d, pz = z + Math.sin(a) * d * 0.6;
+        if (!this.nearNode(px, pz, 2.2)) lump(px, pz, 0.7 + r() * 0.4, big * (0.45 + r() * 0.3));
+      }
+      if (!this.nearNode(x, z + 1.2, 2.2)) lump(x + (r() - 0.5), z + 1.2, 0.9, 0.35);  // foothill
     }
     // trees: forests round the forest battles + a few woods in the empty land (instanced: cheap)
     const trees = [];

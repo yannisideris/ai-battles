@@ -209,7 +209,7 @@ export class MapDiorama {
     const keep = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.8, 1.0), stone); keep.position.y = 0.4; g.add(keep);
     for (const [tx, tz] of [[-0.75, -0.55], [0.75, -0.55], [-0.75, 0.55], [0.75, 0.55]]) {
       const t = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.25, 1.25, 8), stone); t.position.set(tx, 0.62, tz); g.add(t);
-      const cap = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.4, 8), this.mat(0x8a3a2a)); cap.position.set(tx, 1.45, tz); g.add(cap);
+      const cap = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.4, 8), this.mat(0x7a4a58));   // dull red-mauve roofs cap.position.set(tx, 1.45, tz); g.add(cap);
     }
     const flag = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.18, 0.02), this.mat(0xc0392b)); flag.position.set(-0.6, 1.85, -0.55); g.add(flag);
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.5), this.mat(0x3a3630)); pole.position.set(-0.75, 1.7, -0.55); g.add(pole);

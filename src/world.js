@@ -191,6 +191,7 @@ export class World {
     for (let i = a; i <= c; i++) for (let j = b; j <= d; j++) this.set(i, j, v);
   }
   areaFree(x0, z0, x1, z1) {
+    if (this.roadX != null && x1 > this.roadX - 2.0 && x0 < this.roadX + 2.0) return false;   // keep the dirt road clear
     const [a, b] = this.toCell(x0, z0), [c, d] = this.toCell(x1, z1);
     for (let i = a - 1; i <= c + 1; i++) for (let j = b - 1; j <= d + 1; j++) if (this.get(i, j) !== FREE) return false;
     return true;
@@ -290,6 +291,7 @@ export class World {
     // dirt road through the village (not where hills would cut it into jagged pieces)
     const road = new THREE.Mesh(new THREE.PlaneGeometry(3.2, MAP_H + 30), new THREE.MeshToonMaterial({ color: 0xb59a6a, gradientMap: this.grad })); road.visible = !hilly;
     road.rotation.x = -Math.PI / 2; road.position.set(this.rand() * 6 - 3, 0.01, 0); road.receiveShadow = true;
+    this.roadX = road.visible ? road.position.x : null;   // nothing is placed on the road (see areaFree)
     this.group.add(road);
     // map border (invisible walls in the grid, low stone line visually)
     for (let cx = 0; cx < GW; cx++) { this.set(cx, 0, BLOCK); this.set(cx, GH - 1, BLOCK); }
@@ -351,7 +353,9 @@ export class World {
     else if (kind === "hills") { trees(6, 3); rocks(8); }
     else if (kind === "open") { trees(2, 2); rocks(5); }
     else if (kind === "river") {
-      const b1 = -12 + r() * 8, b2 = 4 + r() * 8;   // two bridges
+      // two bridges: one where the road meets the water (the road crosses on it), one well away from it
+      // (at least 10 m apart, the second one toward the side with more room)
+      const b1 = this.roadX ?? -12 + r() * 8, b2 = b1 + (b1 < 0 ? 1 : -1) * (10 + r() * 5);
       const water = new THREE.Mesh(new THREE.PlaneGeometry(MAP_W + 30, 3.4), new THREE.MeshToonMaterial({ color: 0x3f86b8, gradientMap: this.grad }));
       water.rotation.x = -Math.PI / 2; water.position.set(0, 0.02, 0); this.group.add(water);
       for (const bx of [b1, b2]) {

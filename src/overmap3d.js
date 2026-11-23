@@ -119,6 +119,19 @@ export class MapDiorama {
     const water = new THREE.Mesh(new THREE.PlaneGeometry(BW, BD), new THREE.MeshToonMaterial({ color: 0x4f97c4, gradientMap: this.grad }));
     water.rotation.x = -Math.PI / 2; water.position.y = 0.1; this.scene.add(water);
 
+    // a small round clearing of trodden earth at every node: the roads end there (no sharp V where two meet)
+    for (const n of nodes) {
+      const [x, z] = S(n), g = new THREE.CircleGeometry(n.kind === "castle" ? 0.75 : 0.42, 20); g.rotateX(-Math.PI / 2);
+      const p = g.attributes.position;
+      for (let i = 0; i < p.count; i++) p.setY(i, Math.max(this.height(x + p.getX(i), z + p.getZ(i)), 0.12) + 0.025);
+      g.computeVertexNormals();
+      const m = new THREE.Mesh(g, this.mat(0xb59464)); m.position.set(x, 0, z); m.receiveShadow = true; this.scene.add(m);
+    }
+    // roads (walked: light; the ones you can take now: gold)
+    for (const [a, b] of this.s.map.edges) {
+      const A = this.byId.get(a), B = this.byId.get(b), walked = this.visited.has(a) && this.visited.has(b), live = a === this.s.pos && this.reach.has(b);
+      this.road(A, B, walked ? 0xf0e0b4 : live ? 0xf1c40f : 0xb08a58, live ? 0.3 : 0.24, live ? 0.045 : 0.03);
+    }
     // trees: forests round the forest battles + a few woods in the empty land (instanced: cheap)
     const trees = [];
     const wood = (x, z, rad, k) => { for (let i = 0; i < k; i++) { const a = r() * 6.283, d = Math.sqrt(r()) * rad; const tx = x + Math.cos(a) * d * 1.3, tz = z + Math.sin(a) * d * 0.8; if (this.okSpot(tx, tz, 0.55)) trees.push([tx, tz, 0.75 + r() * 0.5]); } };
@@ -129,7 +142,7 @@ export class MapDiorama {
     }
     for (let x = -BW / 2 + 0.6; x < BW / 2 - 0.4; x += 0.55) for (let k = 0; k < 2; k++) {   // the wood along the back edge
       const tx = x + (r() - 0.5) * 0.5, tz = -BD / 2 + 0.5 + r() * 1.6;
-      if (!this.nearNode(tx, tz, 1.4) && this.riverDist(tx, tz) > 0.55 && Math.hypot(tx - this.src[0], tz - this.src[1]) > 1.1) trees.push([tx, tz, 0.8 + r() * 0.5]);
+      if (!this.nearNode(tx, tz, 1.4) && !this.onRoad(tx, tz, 0.35) && this.riverDist(tx, tz) > 0.55 && Math.hypot(tx - this.src[0], tz - this.src[1]) > 1.1) trees.push([tx, tz, 0.8 + r() * 0.5]);
     }
     for (let i = 0; i < 7; i++) { const x = (r() - 0.5) * BW * 0.9, z = this.back + 1.5 + r() * (this.coast0 - this.back - 3); if (!this.nearNode(x, z, 3)) wood(x, z, 1.6 + r() * 1.4, 14); }
     this.addTrees(trees);
@@ -143,14 +156,10 @@ export class MapDiorama {
       if (n.terrain === "ruins") for (let i = 0; i < 6; i++) { const p = spot(1.5); if (p) this.ruin(...p); }
       if (n.terrain === "river") this.bridge(x, z);
     }
-    // roads (walked: light; the ones you can take now: gold)
-    for (const [a, b] of this.s.map.edges) {
-      const A = this.byId.get(a), B = this.byId.get(b), walked = this.visited.has(a) && this.visited.has(b), live = a === this.s.pos && this.reach.has(b);
-      this.road(A, B, walked ? 0xf0e0b4 : live ? 0xf1c40f : 0xb08a58, live ? 0.3 : 0.24, live ? 0.045 : 0.03);
-    }
   }
   nearNode(x, z, d) { return this.nodes.some((n) => { const [a, b] = S(n); return Math.hypot(a - x, b - z) < d; }); }
-  okSpot(x, z, clear) { return z < this.coast(x) - 0.6 && this.riverDist(x, z) > 0.55 && Math.hypot(x - this.src[0], z - this.src[1]) > 1.1 && !this.nearNode(x, z, clear) && Math.abs(x) < BW / 2 - 0.5 && z > -BD / 2 + 0.5; }
+  onRoad(x, z, d) { return (this.roadPts || []).some((p) => (p.x - x) ** 2 + (p.y - z) ** 2 < d * d); }
+  okSpot(x, z, clear) { return !this.onRoad(x, z, 0.55) && z < this.coast(x) - 0.6 && this.riverDist(x, z) > 0.55 && Math.hypot(x - this.src[0], z - this.src[1]) > 1.1 && !this.nearNode(x, z, clear) && Math.abs(x) < BW / 2 - 0.5 && z > -BD / 2 + 0.5; }
   riverInfo(x, z) {
     let d = 1e9, bi = 0; const R = this.river;
     for (let i = 0; i < R.length; i += 3) { const e = (R[i].x - x) ** 2 + (R[i].z - z) ** 2; if (e < d) { d = e; bi = i; } }
@@ -220,6 +229,7 @@ export class MapDiorama {
     const k = ((A.id * 7 + B.id * 13) % 11) / 11 - 0.5, nx = -(z2 - z1), nz = x2 - x1, l = Math.hypot(nx, nz) || 1;
     const curve = new THREE.QuadraticBezierCurve(new THREE.Vector2(x1, z1), new THREE.Vector2(mx + (nx / l) * k * 2.2, mz + (nz / l) * k * 2.2), new THREE.Vector2(x2, z2));
     const pts = curve.getSpacedPoints(30), verts = [], idx = [];
+    (this.roadPts ??= []).push(...pts);
     pts.forEach((p, i) => {
       const q = pts[Math.min(i + 1, pts.length - 1)], o = pts[Math.max(i - 1, 0)], dx = q.x - o.x, dz = q.y - o.y, d = Math.hypot(dx, dz) || 1;
       const sx = (-dz / d) * w / 2, sz = (dx / d) * w / 2;

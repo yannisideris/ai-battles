@@ -121,7 +121,7 @@ function makeMap(seed) {
     const n = c === 0 || c === COLS - 1 ? 1 : 2 + (r() < 0.5 ? 1 : 0);
     const col = [];
     for (let i = 0; i < n; i++) {
-      const y = n === 1 ? 50 : 18 + (64 * i) / (n - 1) + (r() - 0.5) * 12;
+      const y = n === 1 ? 45 : 17 + (52 * i) / (n - 1) + (r() - 0.5) * 10;   // (room for mountains above and the sea below)
       col.push({ id: id++, col: c, x: 5 + (90 * c) / (COLS - 1) + (r() - 0.5) * 4, y });
     }
     cols.push(col);

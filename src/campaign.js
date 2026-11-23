@@ -4,6 +4,7 @@
 import { CAPTAIN_TYPES, QUALITY, STATS } from "./config.js";
 import { unitPortraits, UnitPreview } from "./assets.js";
 import { drawMap } from "./overmap.js";
+import { MapDiorama } from "./overmap3d.js";
 
 export const PRICE = { soldier: 20, archer: 25, spearman: 25, shieldbearer: 30, scout: 25, brute: 45, mage: 45, support: 50, monster: 120,
   captain: 100, captain_ranged: 100, captain_heavy: 110 };
@@ -101,6 +102,7 @@ function enemyArmy(budget, r, captains, themeName) {
     const pool = theme.core.length && r() < 0.72 ? theme.core : theme.extra;
     const t = pickR(r, pool);
     if (LIMIT[t] && count(t) >= LIMIT[t]) continue;
+    if (t === "monster" && (budget < 480 || out.length < 7)) continue;   // the monster only in strong armies, never instead of a core
     if (PRICE[t] > left) { if (left < 30) break; continue; }
     out.push({ type: t, vet: 0 }); left -= PRICE[t];
   }
@@ -228,7 +230,7 @@ export class Campaign {
     const nodes = s.map.cols.flat(), visited = new Set(s.visited);
     const btns = nodes.map((n) => {
       const reach = nx.includes(n);
-      return `<button class="node k-${n.kind} ${visited.has(n.id) ? "done" : ""} ${reach ? "reach" : ""}" style="left:${n.x}%;top:${n.y}%"
+      return `<button data-nid="${n.id}" class="node k-${n.kind} ${n.id === s.pos ? "here" : ""} ${visited.has(n.id) ? "done" : ""} ${reach ? "reach" : ""}" style="left:${n.x}%;top:${n.y}%"
         ${reach ? `data-act="sel" data-id="${n.id}"` : "tabindex=-1 disabled"} title="${t.kinds[n.kind] || ""}">${ICON[n.kind]}</button>`;
     }).join("");
     const me = this.node(s.pos);
@@ -241,7 +243,20 @@ export class Campaign {
     this.bind({ sel: (b) => { this.sel = Number(b.dataset.id); this.nodeInfo(); }, go: () => this.go(), army: () => this.campScreen(),
       save: () => this.saveScreen(), menu: () => this.toMenu() });
     this.nodeInfo();
-    requestAnimationFrame(() => drawMap(document.getElementById("mapcv"), s, nx, rng));
+    // the map: the 3D diorama (?map=2d: the painted one, kept for comparing)
+    const cv = document.getElementById("mapcv"), lead = s.roster.find((e) => e.id === s.lead)?.type || s.roster[0]?.type || "soldier";
+    this.diorama = null;
+    if (new URLSearchParams(location.search).get("map") === "2d") requestAnimationFrame(() => drawMap(cv, s, nx, rng));
+    else {
+      document.getElementById("pawn")?.remove();
+      document.getElementById("map").classList.add("d3");
+      try {
+        const d = this.diorama = new MapDiorama(cv, s, nx, rng, QUALITY[this.game.settings.quality] || QUALITY.medium, lead);
+        // the node buttons follow the board (they sit over the canvas, in screen space)
+        const btns = [...document.querySelectorAll("#map .node")];
+        d.onFrame = () => { for (const b of btns) { const [x, y] = d.screenPos(this.node(Number(b.dataset.nid))); b.style.left = `${x}px`; b.style.top = `${y}px`; } d.onFrame = null; };
+      } catch (e) { console.warn("diorama", e); requestAnimationFrame(() => drawMap(cv, s, nx, rng)); }
+    }
     // start with the focus on the battle button, so A / Enter just goes
     this.focus = this.buttons().findIndex((b) => b.dataset.act === "go"); this.markFocus();
   }
@@ -339,9 +354,12 @@ export class Campaign {
   go() {
     const n = this.node(this.sel); if (!n || !this.next().includes(n)) return;
     if (!this.field().length) { this.campScreen(); return; }
+    if (this.going) return; this.going = true;
+    const start = () => { this.going = false; this.startBattle(n); };
+    if (this.diorama && !this.diorama.disposed) { this.diorama.moveTo(n, start); return; }   // the miniature walks the road
     const pawn = document.getElementById("pawn");
-    pawn.style.left = `${n.x}%`; pawn.style.top = `${n.y}%`;   // the pawn slides along the path (CSS transition)
-    setTimeout(() => this.startBattle(n), 950);
+    if (pawn) { pawn.style.left = `${n.x}%`; pawn.style.top = `${n.y}%`; }   // (2d map) the pawn slides along the path
+    setTimeout(start, 950);
   }
   startBattle(n) {
     const g = this.game, s = this.state, side = s.side, foe = this.enemy();

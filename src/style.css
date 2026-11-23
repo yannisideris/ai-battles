@@ -113,3 +113,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 .prev canvas { width: 158px; height: 190px; display: block; margin: 0 auto; }
 .prev small { opacity: .75; } .prev b + small { color: #f1c40f; opacity: 1; }
 @media (max-width: 600px) { .shopwrap { flex-direction: column-reverse; } .prev { width: 100%; } }
+#map.d3 { background: radial-gradient(#26493c, #102822 75%); border-color: #1b6e55; }
+#map.d3 .node { width: 26px; height: 26px; font-size: 13px; background: rgba(20,30,26,.75); margin-top: -22px; }
+#map.d3 .node.k-castle { margin-top: -40px; }
+#map.d3 .node.here { opacity: 0 !important; }

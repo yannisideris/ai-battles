@@ -75,7 +75,10 @@ export class MapDiorama {
     // sandbanks in the mouth (a small delta)
     const m = this.river[this.river.length - 1], m2 = this.river[this.river.length - 12];
     const ax = m.x - m2.x, az = m.z - m2.z, al = Math.hypot(ax, az) || 1;
-    this.banks = [[m.x - (ax / al) * 0.7, m.z - (az / al) * 0.7, 0.24]];
+    this.banks = [];
+    const R = this.river, ci = Math.max(1, R.findIndex((p) => p.z > this.coast(p.x) + 0.15));   // where the river meets the sea
+    const c0 = R[ci], c1 = R[Math.min(R.length - 1, ci + 6)], cl = Math.hypot(c1.x - c0.x, c1.z - c0.z) || 1;
+    this.islet = [c0.x + ((c1.x - c0.x) / cl) * 0.55, c0.z + ((c1.z - c0.z) / cl) * 0.55];
     // hills round the nodes that have them (the battle's high ground), a few more in the empty land
     this.bumps = [];
     for (const n of nodes) if (n.hills) {
@@ -105,6 +108,14 @@ export class MapDiorama {
     geo.setAttribute("color", new THREE.Float32BufferAttribute(cols, 3)); geo.computeVertexNormals();
     const ground = new THREE.Mesh(geo, new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: this.grad }));
     ground.receiveShadow = true; this.scene.add(ground);
+    // the tiny sandy islet in the river mouth
+    if (this.islet) {
+      const [ix, iz] = this.islet;
+      const isle = new THREE.Mesh(new THREE.SphereGeometry(0.2, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2), this.mat(0xe3d29a));
+      isle.scale.set(1.25, 0.32, 0.85); isle.rotation.y = r() * 3; isle.position.set(ix, 0.08, iz); isle.receiveShadow = true; this.scene.add(isle);
+      const tuft = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 5, 0, Math.PI * 2, 0, Math.PI / 2), this.mat(0x8fbf5c));
+      tuft.scale.set(1.3, 0.6, 1); tuft.position.set(ix + 0.04, 0.135, iz - 0.02); this.scene.add(tuft);
+    }
     // the board's earth sides (a diorama on the table)
     const base = new THREE.Mesh(new THREE.BoxGeometry(BW, 1.6, BD), this.mat(0x6b4f33)); base.position.y = -0.85; this.scene.add(base);
     // water: one sheet; the ground above it hides it except in the sea and the river bed

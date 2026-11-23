@@ -74,7 +74,7 @@ export class MapDiorama {
       const dc = this.coast(x) - z, dr = this.riverDist(x, z);
       if (dc < 0.9) col.lerp(sand, smooth((0.9 - dc) / 0.6));
       if (dr < 0.55) col.lerp(sand, smooth((0.55 - dr) / 0.3) * 0.6);
-      if (y > 0.9) col.lerp(rock, smooth((y - 0.9) / 0.8));
+      if (z < this.back + 1.5) col.lerp(grass, 0.4).offsetHSL(0, 0, -0.03);   // greener, darker woodland at the back
       cols.push(col.r, col.g, col.b);
     }
     geo.setAttribute("color", new THREE.Float32BufferAttribute(cols, 3)); geo.computeVertexNormals();
@@ -86,30 +86,6 @@ export class MapDiorama {
     const water = new THREE.Mesh(new THREE.PlaneGeometry(BW, BD), new THREE.MeshToonMaterial({ color: 0x4f97c4, gradientMap: this.grad, transparent: true, opacity: 0.92 }));
     water.rotation.x = -Math.PI / 2; water.position.y = 0.1; this.scene.add(water);
 
-    // mountains along the back: brown, rounded rocky masses in clusters (a big one, smaller ones round it, foothills)
-    const browns = [0x8a6a48, 0x7d5f40, 0x96764f, 0x6f5338].map((c) => this.mat(c));
-    const lump = (x, z, rad, hgt) => {
-      const g = new THREE.DodecahedronGeometry(1, 1), p = g.attributes.position;
-      const kk = new Map();
-      for (let i = 0; i < p.count; i++) {   // knobbly: push each corner in or out a little (shared corners move together), flatten the underside
-        const key = `${p.getX(i).toFixed(3)},${p.getY(i).toFixed(3)},${p.getZ(i).toFixed(3)}`; if (!kk.has(key)) kk.set(key, 0.82 + r() * 0.3); const k = kk.get(key); p.setXYZ(i, p.getX(i) * k, Math.max(-0.25, p.getY(i)) * k, p.getZ(i) * k);
-      }
-      g.computeVertexNormals();
-      const m = new THREE.Mesh(g, browns[Math.floor(r() * browns.length)]);
-      m.scale.set(rad, hgt, rad * (0.75 + r() * 0.3)); m.rotation.y = r() * 3;
-      m.position.set(x, this.height(x, z) + hgt * 0.15, z); m.castShadow = true; m.receiveShadow = true; this.scene.add(m);
-    };
-    for (let x = -BW / 2 + 1.2; x < BW / 2 - 0.5; x += 2.6 + r() * 2.2) {
-      const z = this.back - 0.7 + (r() - 0.5) * 1.2;
-      if (this.nearNode(x, z, 2.4)) continue;
-      const big = 1.3 + r() * 0.6;
-      lump(x, z, 1.25 + r() * 0.5, big);                                              // the main mass
-      for (let k = 0; k < 2 + Math.floor(r() * 2); k++) {                             // smaller ones round it
-        const a = r() * Math.PI * 2, d = 0.9 + r() * 0.7, px = x + Math.cos(a) * d, pz = z + Math.sin(a) * d * 0.6;
-        if (!this.nearNode(px, pz, 2.2)) lump(px, pz, 0.7 + r() * 0.4, big * (0.45 + r() * 0.3));
-      }
-      if (!this.nearNode(x, z + 1.2, 2.2)) lump(x + (r() - 0.5), z + 1.2, 0.9, 0.35);  // foothill
-    }
     // trees: forests round the forest battles + a few woods in the empty land (instanced: cheap)
     const trees = [];
     const wood = (x, z, rad, k) => { for (let i = 0; i < k; i++) { const a = r() * 6.283, d = Math.sqrt(r()) * rad; const tx = x + Math.cos(a) * d * 1.3, tz = z + Math.sin(a) * d * 0.8; if (this.okSpot(tx, tz, 0.55)) trees.push([tx, tz, 0.75 + r() * 0.5]); } };
@@ -117,6 +93,10 @@ export class MapDiorama {
       const [x, z] = S(n);
       if (n.terrain === "forest" && n.kind !== "castle" && n.kind !== "camp") wood(x, z, 2.2, 34);
       else if (n.kind !== "castle") wood(x, z, 2.4, n.terrain === "open" ? 1 : 4);
+    }
+    for (let x = -BW / 2 + 0.6; x < BW / 2 - 0.4; x += 0.55) for (let k = 0; k < 2; k++) {   // the wood along the back edge
+      const tx = x + (r() - 0.5) * 0.5, tz = -BD / 2 + 0.5 + r() * 1.6;
+      if (!this.nearNode(tx, tz, 1.4) && this.riverDist(tx, tz) > 0.55) trees.push([tx, tz, 0.8 + r() * 0.5]);
     }
     for (let i = 0; i < 7; i++) { const x = (r() - 0.5) * BW * 0.9, z = this.back + 1.5 + r() * (this.coast0 - this.back - 3); if (!this.nearNode(x, z, 3)) wood(x, z, 1.6 + r() * 1.4, 14); }
     this.addTrees(trees);
@@ -142,7 +122,7 @@ export class MapDiorama {
   height(x, z) {
     let y = 0.3 + Math.sin(x * 0.5) * Math.cos(z * 0.6) * 0.05;
     for (const [bx, bz, br, bh] of this.bumps) { const d = Math.hypot((x - bx) / br, (z - bz) / (br * 0.75)); if (d < 1.6) y += bh * Math.exp(-d * d * 1.6); }
-    if (z < this.back + 1.5) y += smooth((this.back + 1.5 - z) / 2.5) * 0.9;                          // rising to the mountains
+    if (z < this.back + 1.5) y += smooth((this.back + 1.5 - z) / 2.5) * (0.35 + 0.2 * Math.sin(x * 0.6));   // gently rolling up at the back
     const dr = this.riverDist(x, z); if (dr < 0.5) y = Math.min(y, 0.02 + (y - 0.02) * smooth(dr / 0.5));   // river bed
     const dc = z - this.coast(x); if (dc > -0.3) y = Math.min(y, 0.3 - smooth((dc + 0.3) / 0.9) * 0.55);    // beach into the sea
     return y;

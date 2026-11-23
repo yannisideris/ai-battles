@@ -119,14 +119,6 @@ export class MapDiorama {
     const water = new THREE.Mesh(new THREE.PlaneGeometry(BW, BD), new THREE.MeshToonMaterial({ color: 0x4f97c4, gradientMap: this.grad }));
     water.rotation.x = -Math.PI / 2; water.position.y = 0.1; this.scene.add(water);
 
-    // a small round clearing of trodden earth at every node: the roads end there (no sharp V where two meet)
-    for (const n of nodes) {
-      const [x, z] = S(n), g = new THREE.CircleGeometry(n.kind === "castle" ? 0.75 : 0.42, 20); g.rotateX(-Math.PI / 2);
-      const p = g.attributes.position;
-      for (let i = 0; i < p.count; i++) p.setY(i, Math.max(this.height(x + p.getX(i), z + p.getZ(i)), 0.12) + 0.025);
-      g.computeVertexNormals();
-      const m = new THREE.Mesh(g, this.mat(0xb59464)); m.position.set(x, 0, z); m.receiveShadow = true; this.scene.add(m);
-    }
     // roads (walked: light; the ones you can take now: gold)
     for (const [a, b] of this.s.map.edges) {
       const A = this.byId.get(a), B = this.byId.get(b), walked = this.visited.has(a) && this.visited.has(b), live = a === this.s.pos && this.reach.has(b);

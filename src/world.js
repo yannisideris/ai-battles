@@ -354,8 +354,8 @@ export class World {
     else if (kind === "open") { trees(2, 2); rocks(5); }
     else if (kind === "river") {
       // two bridges: one where the road meets the water (the road crosses on it), one well away from it
-      // (at least 10 m apart, the second one toward the side with more room)
-      const b1 = this.roadX ?? -12 + r() * 8, b2 = b1 + (b1 < 0 ? 1 : -1) * (10 + r() * 5);
+      // (16-20 m apart, the second one toward the side with more room, never at the map edge)
+      const b1 = this.roadX ?? -12 + r() * 8, b2 = Math.max(-19, Math.min(19, b1 + (b1 < 0 ? 1 : -1) * (16 + r() * 4)));
       const water = new THREE.Mesh(new THREE.PlaneGeometry(MAP_W + 30, 3.4), new THREE.MeshToonMaterial({ color: 0x3f86b8, gradientMap: this.grad }));
       water.rotation.x = -Math.PI / 2; water.position.set(0, 0.02, 0); this.group.add(water);
       for (const bx of [b1, b2]) {
@@ -373,9 +373,10 @@ export class World {
       trees(8, 4); rocks(5);
     } else if (kind === "graveyard") {
       const m = this.mat(0x9a9aa2), dark = this.mat(0x6e6a64);
-      for (let gx = -4; gx <= 4; gx++) for (let gz = -3; gz <= 3; gz++) {
-        if (r() < 0.35) continue;
-        const x = gx * 2.6 + (r() - 0.5) * 0.6, z = gz * 3.2 + (r() - 0.5) * 0.6;
+      // graves spread out, loosely in rows (more room between them, not a parade ground)
+      for (let gx = -3; gx <= 3; gx++) for (let gz = -2; gz <= 2; gz++) {
+        if (r() < 0.45) continue;
+        const x = gx * 3.6 + (r() - 0.5) * 1.6, z = gz * 4.4 + (r() - 0.5) * 1.4;
         if (!this.areaFree(x - 0.3, z - 0.2, x + 0.3, z + 0.2)) continue;
         const stone = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.7 + r() * 0.3, 0.16), r() < 0.5 ? m : dark);
         stone.position.set(x, 0.38, z); stone.rotation.y = (r() - 0.5) * 0.3; stone.castShadow = this.q.shadows; this.group.add(stone);

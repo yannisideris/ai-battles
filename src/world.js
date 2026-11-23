@@ -373,10 +373,10 @@ export class World {
       trees(8, 4); rocks(5);
     } else if (kind === "graveyard") {
       const m = this.mat(0x9a9aa2), dark = this.mat(0x6e6a64);
-      // graves spread out, loosely in rows (more room between them, not a parade ground)
+      // graves in neat rows, with more room between them
       for (let gx = -3; gx <= 3; gx++) for (let gz = -2; gz <= 2; gz++) {
         if (r() < 0.45) continue;
-        const x = gx * 3.6 + (r() - 0.5) * 1.6, z = gz * 4.4 + (r() - 0.5) * 1.4;
+        const x = gx * 3.6 + (r() - 0.5) * 0.6, z = gz * 4.4 + (r() - 0.5) * 0.6;
         if (!this.areaFree(x - 0.3, z - 0.2, x + 0.3, z + 0.2)) continue;
         const stone = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.7 + r() * 0.3, 0.16), r() < 0.5 ? m : dark);
         stone.position.set(x, 0.38, z); stone.rotation.y = (r() - 0.5) * 0.3; stone.castShadow = this.q.shadows; this.group.add(stone);

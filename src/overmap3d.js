@@ -78,7 +78,7 @@ export class MapDiorama {
     this.banks = [];
     const R = this.river, ci = Math.max(1, R.findIndex((p) => p.z > this.coast(p.x) + 0.15));   // where the river meets the sea
     const c0 = R[ci], c1 = R[Math.min(R.length - 1, ci + 6)], cl = Math.hypot(c1.x - c0.x, c1.z - c0.z) || 1;
-    this.islet = [c0.x + ((c1.x - c0.x) / cl) * 0.55, c0.z + ((c1.z - c0.z) / cl) * 0.55];
+    this.islet = [c0.x - ((c1.x - c0.x) / cl) * 0.35, c0.z - ((c1.z - c0.z) / cl) * 0.35];   // just inside the mouth, mid-channel
     // hills round the nodes that have them (the battle's high ground), a few more in the empty land
     this.bumps = [];
     for (const n of nodes) if (n.hills) {

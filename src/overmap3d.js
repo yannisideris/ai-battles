@@ -96,10 +96,7 @@ export class MapDiorama {
       const n = Math.sin(x * 0.7) * Math.cos(z * 0.9) * 0.5 + Math.sin(x * 2.1 + z * 1.7) * 0.5;
       col.copy(grass).lerp(dry, 0.3 + n * 0.25);
       const dc = this.coast(x) - z, [rd, rt] = this.riverInfo(x, z), rw = this.riverWidth(rt);
-      const [p0, p1, p2] = this.sandPh;
-      const sw = 0.55 + 0.35 * Math.sin(x * 0.42 + p0) + 0.15 * Math.sin(x * 1.3 + p1);             // how far up the sand reaches
-      const soft = 0.08 + 0.5 * smooth(0.5 + 0.5 * Math.sin(x * 0.27 + p2));                         // sharp edge here, blurred there
-      if (dc < sw + soft) col.lerp(sand, smooth((sw + soft - dc) / (soft * 2)));
+      if (dc < 0.66) col.lerp(sand, smooth((0.66 - dc) / 0.06));   // the beach: even width, a clean edge to the grass
       if (rd < rw + 0.35) col.lerp(sand, smooth((rw + 0.35 - rd) / 0.25) * (0.35 + 0.4 * rt));
       if (this.banks.some(([bx, bz, br]) => Math.hypot(x - bx, z - bz) < br)) col.copy(sand);
       if (z < this.back + 1.5) col.lerp(grass, 0.4).offsetHSL(0, 0, -0.03);   // greener, darker woodland at the back

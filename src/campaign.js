@@ -27,7 +27,7 @@ const LIMIT = { monster: 1, support: 2, mage: 3 };
 
 const T = {
   el: {
-    yourArmy: "Ο στρατός σου", sell: "Επιστροφή", back2: "Πίσω",
+    yourArmy: "Ο στρατός σου", sell: "Επιστροφή", back2: "Πίσω", train: "Εκπαίδευση: +1 ★",
     title: "Εκστρατεία", newC: "Νέα εκστρατεία", contC: "Συνέχεια", sure: "Σίγουρα; Νέος χάρτης", lost: "Ήττα",
     lostSub: "Ο στρατός σου γυρίζει στον χάρτη, όπως ήταν πριν ξεκινήσει για τη μάχη.", toMap: "Στον χάρτη", load: "Φόρτωση", back: "Πίσω", empty: "κενή", auto: "Αυτόματη",
     slot: (s) => (s === "auto" ? "Αυτόματη" : `Θέση ${s}`), save: "Αποθήκευση", saved: "Αποθηκεύτηκε", menu: "Μενού",
@@ -50,7 +50,7 @@ const T = {
     },
   },
   en: {
-    yourArmy: "Your army", sell: "Refund", back2: "Back",
+    yourArmy: "Your army", sell: "Refund", back2: "Back", train: "Training: +1 ★",
     title: "Campaign", newC: "New campaign", contC: "Continue", sure: "Sure? New map", lost: "Defeat",
     lostSub: "Your army goes back to the map, as it was before it set off for the battle.", toMap: "To the map", load: "Load", back: "Back", empty: "empty", auto: "Auto",
     slot: (s) => (s === "auto" ? "Autosave" : `Slot ${s}`), save: "Save", saved: "Saved", menu: "Menu",
@@ -91,6 +91,7 @@ function rng(seed) {   // mulberry32
   return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
 const pickR = (r, a) => a[Math.floor(r() * a.length)];
+export const trainCost = (e) => Math.round((PRICE[e.type] * 0.5 * ((e.vet || 0) + 1)) / 5) * 5;
 export const unitValue = (e) => PRICE[e.type] * (1 + 0.35 * (e.vet || 0));
 const armyValue = (list) => list.reduce((s, e) => s + unitValue(e), 0);
 const isCap = (t) => CAPTAIN_TYPES.includes(t);
@@ -148,10 +149,10 @@ function makeMap(seed) {
     const kind = last ? "castle" : pickR(r, ["normal", "normal", "normal", "ambush", "defend"]);
     // plenty of random, but steadier in the first two columns (a bad roll there should not wall you in)
     // the strength climbs faster toward the end: reaching (and taking) the castle should be something exceptional
-    const base = 230 + n.col * 85 + n.col * n.col * 7;
+    const base = 230 + n.col * 85 + n.col * n.col * 10;
     let budget = base * (n.col <= 2 ? 0.62 + r() * 0.35 : 0.72 + r() * 0.65);   // (column 2 comes right after the bloody opening)
     if (kind === "defend") budget *= 1.2;
-    if (last) budget = base * 1.3;
+    if (last) budget = base * 1.4;
     n.kind = kind;
     n.terrain = last ? "ruins" : pickR(r, TERRAINS);
     // high ground only on some battlefields: always on "hills", now and then on open / forest / ruins
@@ -324,6 +325,7 @@ export class Campaign {
       <div class="unit ${e.field ? "" : "res"}"><img class="ico" data-ico="${e.type}" alt=""><span class="nm">${this.name(e.type)} <span class="stars">${"★".repeat(e.vet || 0)}</span>${e.id === s.lead ? ` <b class="lead">${t.lead}</b>` : ""}</span>
         <button data-act="field" data-id="${e.id}">${e.field ? t.inField : t.reserve}</button>
         ${isCap(e.type) && e.id !== s.lead ? `<button data-act="lead" data-id="${e.id}">${t.makeLead}</button>` : ""}
+        ${!sk && (e.vet || 0) < 3 ? `<button data-act="train" data-id="${e.id}" title="${t.train}" ${trainCost(e) > s.coins ? "disabled" : ""}>★+ <small>${trainCost(e)}</small></button>` : ""}
         ${sk ? `<button data-act="sell" data-id="${e.id}" title="${t.sell}">✕</button>` : ""}</div>`).join("");
     const shop = SHOP.map((type) => {
       const no = PRICE[type] > s.coins || (isCap(type) && nCap >= MAX_CAPTAINS);
@@ -352,6 +354,11 @@ export class Campaign {
         if (!this.field().length) { this.flash(t.noField); return; }
         if (sk) { this.startSkirmish(); return; }
         this.lastResult = null; this.save(); this.mapScreen();
+      },
+      train: (b) => {
+        const e = s.roster.find((x) => x.id === Number(b.dataset.id)), c = trainCost(e);
+        if ((e.vet || 0) >= 3 || c > s.coins) return;
+        s.coins -= c; e.vet = (e.vet || 0) + 1; this.campScreen();
       },
       sell: (b) => { const e = s.roster.find((x) => x.id === Number(b.dataset.id)); s.coins += PRICE[e.type]; s.roster = s.roster.filter((x) => x !== e); this.fixLead(); this.campScreen(); },
       menu: () => this.toMenu(),
@@ -461,6 +468,11 @@ export class Campaign {
     for (let guard = 0; guard < 30; guard++) {
       const t = want(); if (PRICE[t] > s.coins || s.roster.length >= MAX_FIELD + 6) break;   // a reserve of up to 6
       s.coins -= PRICE[t]; s.roster.push({ id: s.nextId++, type: t, vet: 0, field: true });
+    }
+    for (let guard = 0; guard < 60; guard++) {
+      const c = s.roster.filter((e) => (e.vet || 0) < 3).sort((x, y) => trainCost(x) - trainCost(y))[0];
+      if (!c || trainCost(c) > s.coins) break;
+      s.coins -= trainCost(c); c.vet = (c.vet || 0) + 1;
     }
     // the best 16 go into battle (captains, then by worth: veterans and specials first)
     const best = [...s.roster].sort((x, y) => (isCap(y.type) - isCap(x.type)) || unitValue(y) - unitValue(x)).slice(0, MAX_FIELD);

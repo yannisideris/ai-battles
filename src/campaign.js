@@ -12,7 +12,7 @@ export const MAX_FIELD = 16, MAX_CAPTAINS = 3;
 const SLOTS = ["auto", "1", "2", "3"];
 const KEY = (s) => `aib.campaign.${s}`;
 const COLS = 8;              // 0 = your camp, 1..6 battles, 7 = the enemy castle
-const TERRAINS = ["village", "forest", "open", "river", "graveyard", "ruins"];
+const TERRAINS = ["village", "forest", "open", "river", "graveyard", "ruins", "hills"];
 // enemy armies have a CORE (a mass of one or two kinds, the look we like) and a few specials around it
 const THEMES = {
   shieldwall: { core: ["soldier", "soldier", "shieldbearer"], extra: ["archer", "spearman", "support"] },
@@ -32,7 +32,7 @@ const T = {
     fight: "Μάχη!", army: "Στρατός", cont: "Συνέχεια", coins: "νομίσματα", battle: "μάχη",
     kinds: { normal: "Μάχη", ambush: "Ενέδρα", defend: "Υπεράσπιση", elite: "Ισχυρός εχθρός", castle: "Το κάστρο" },
     kindHelp: { normal: "", ambush: "ξεκινάς κυκλωμένος από το πλάι", defend: (t) => `κράτα ${mmss(t)} ή νίκησέ τους`, elite: "δυσκολότερη, καλύτερη αμοιβή", castle: "η τελική μάχη" },
-    terr: { village: "χωριό", forest: "δάσος", open: "ανοιχτός κάμπος", river: "ποτάμι", graveyard: "νεκροταφείο", ruins: "ερείπια" },
+    terr: { village: "χωριό", forest: "δάσος", open: "ανοιχτός κάμπος", river: "ποτάμι", graveyard: "νεκροταφείο", ruins: "ερείπια", hills: "λόφοι" }, hill: "με λόφο",
     themes: { shieldwall: "τείχος ασπίδων", arrows: "βροχή βελών", spears: "λόγχες", magic: "μαγεία", horde: "ορδή", legion: "λεγεώνα", mixed: "λίγο απ' όλα" },
     power: ["εύκολη", "ισάξια", "δύσκολη", "πολύ δύσκολη"], enemies: "εχθροί", reward: "αμοιβή",
     pick: "Διάλεξε τον επόμενο κόμβο", inField: "στη μάχη", reserve: "εφεδρεία", lead: "Αρχηγός", makeLead: "Αρχηγός",
@@ -53,7 +53,7 @@ const T = {
     fight: "Battle!", army: "Army", cont: "Continue", coins: "coins", battle: "battle",
     kinds: { normal: "Battle", ambush: "Ambush", defend: "Defence", elite: "Strong enemy", castle: "The castle" },
     kindHelp: { normal: "", ambush: "you start flanked", defend: (t) => `hold ${mmss(t)} or beat them`, elite: "harder, better reward", castle: "the final battle" },
-    terr: { village: "village", forest: "forest", open: "open field", river: "river", graveyard: "graveyard", ruins: "ruins" },
+    terr: { village: "village", forest: "forest", open: "open field", river: "river", graveyard: "graveyard", ruins: "ruins", hills: "hills" }, hill: "with a hill",
     themes: { shieldwall: "shield wall", arrows: "rain of arrows", spears: "spears", magic: "magic", horde: "horde", legion: "legion", mixed: "a bit of everything" },
     power: ["easy", "even", "hard", "very hard"], enemies: "enemies", reward: "reward",
     pick: "Pick the next node", inField: "in battle", reserve: "reserve", lead: "Leader", makeLead: "Leader",
@@ -137,6 +137,8 @@ function makeMap(seed) {
     if (last) budget = (230 + n.col * 85) * 1.45;
     n.kind = kind;
     n.terrain = last ? "ruins" : pickR(r, TERRAINS);
+    // high ground only on some battlefields: always on "hills", now and then on open / forest / ruins
+    n.hills = n.terrain === "hills" ? 2 : ["open", "forest", "ruins"].includes(n.terrain) && r() < 0.35 ? 1 : 0;
     n.theme = last ? "legion" : pickR(r, Object.keys(THEMES));
     n.budget = Math.round(budget);
     n.army = enemyArmy(n.budget, r, last ? 3 : kind === "elite" && r() < 0.5 ? 2 : 1, n.theme);
@@ -239,7 +241,7 @@ export class Campaign {
     if (!n) { box.innerHTML = t.pick; return; }
     const help = typeof t.kindHelp[n.kind] === "function" ? t.kindHelp[n.kind](n.defendT) : t.kindHelp[n.kind];
     const caps = n.army.filter((e) => isCap(e.type)).map((e) => this.name(e.type, this.enemy())).join(", ");
-    box.innerHTML = `<b>${ICON[n.kind]} ${t.kinds[n.kind]}</b> · ${t.terr[n.terrain]}${help ? ` · <i>${help}</i>` : ""}<br>
+    box.innerHTML = `<b>${ICON[n.kind]} ${t.kinds[n.kind]}</b> · ${t.terr[n.terrain]}${n.hills === 1 ? ` ${t.hill}` : ""}${help ? ` · <i>${help}</i>` : ""}<br>
       ${n.army.length} ${t.enemies} (${t.themes[n.theme]}) · ${caps} · ${this.powerLabel(n)} · ${t.reward} ~${n.reward}`;
   }
   enemy() { return this.state.side === "human" ? "skeleton" : "human"; }
@@ -322,7 +324,7 @@ export class Campaign {
       const z = 0.25 * (side === "human" ? 27 : -27), from = Math.random() < 0.5 ? -1 : 1;
       spawn = { [side]: { x: 0, z, facing: side === "human" ? Math.PI : 0 }, [foe]: { x: from * 15, z: z * 0.6, facing: from < 0 ? Math.PI / 2 : -Math.PI / 2 } };
     }
-    g.campaignBattle = { armies, terrain: n.terrain, spawn, kind: n.kind, defendT: n.defendT || 0 };
+    g.campaignBattle = { armies, terrain: n.terrain, hills: n.hills || 0, spawn, kind: n.kind, defendT: n.defendT || 0 };
     g.settings.role = "captain";
     this.hide();
     g.start();

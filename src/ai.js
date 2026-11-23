@@ -295,6 +295,16 @@ export class Brain {
     const ord = u.order || {};
     if (ord.charge) this.regrouping = false;   // a charge does not stop to lick its wounds
     const fleeing = !lastStand && u.morale < 22 * (1.4 - u.trait.bravery * 0.5) && !u.isPlayer;
+    // falling back (not fleeing): now and then the shooters pull back onto a hill on our side instead of to the
+    // captain. Decided once per retreat, so they do not keep changing their minds.
+    const retreating = plan.stance === "fallback" && !lastStand && !fleeing && !this.regrouping;
+    if (!retreating) this.retreatHill = undefined;
+    else if (u.ranged && this.retreatHill === undefined) this.retreatHill = Math.random() < 0.4 ? this.retreatSpot(foes) : null;
+    if (retreating && this.retreatHill) {
+      const near = Math.hypot(u.pos.x - this.retreatHill.x, u.pos.z - this.retreatHill.z) < 1.0;
+      this.goal = near ? null : { x: this.retreatHill.x, z: this.retreatHill.z, tol: 0.6, run: 1.1 };
+      this.engaged = false; return;
+    }
     if (this.regrouping || fleeing || (plan.stance === "fallback" && !lastStand)) {
       const { dir } = general.axes();
       const anchor = captain ? captain.pos : { x: u.pos.x, z: g.spawnZ(u.team) };
@@ -440,6 +450,44 @@ export class Brain {
     return { x: t.pos.x, z: t.pos.z, tol: reach * 0.8 };
   }
 
+  // a spot on a hill top worth taking: close to us, not closer to the enemy than to us, no enemy on it, and near
+  // enough to the fighting to shoot from. Each shooter gets its own spot on the top (spread round the middle).
+  // Only when it makes sense right now: not with the fight already on us, and not walking away from a good shot.
+  hillSpot(foes, t) {
+    const u = this.u, w = u.game.world; if (!w.hills.length || !foes.length) return null;
+    if (Math.min(...foes.map((f) => u.dist(f))) < 6) return null;                     // they are on us: no time to climb
+    // where the action is right now: the enemy, and where the two lines meet (our melee vs theirs)
+    const fc = centroid(foes), mine = u.game.alive(u.team).filter((a) => a.line);
+    const mc = mine.length ? centroid(mine) : u.pos, clash = { x: (fc.x + mc.x) / 2, z: (fc.z + mc.z) / 2 };
+    const reachTop = u.baseRange * 1.25;   // the range we would have up there
+    let best = null, bestD = 1e9;
+    for (const h of w.hillTops()) {
+      const du = Math.hypot(u.pos.x - h.x, u.pos.z - h.z);
+      const df = Math.min(...foes.map((f) => Math.hypot(f.pos.x - h.x, f.pos.z - h.z)));
+      if (du > 16 || df < h.r + 1.5 || df < du * 0.8) continue;                       // too far / held / they get there first
+      // strategic only if from the top we can shoot into the action (the fight is not somewhere else)
+      if (Math.min(Math.hypot(fc.x - h.x, fc.z - h.z), Math.hypot(clash.x - h.x, clash.z - h.z)) > reachTop) continue;
+      if (t && du > 5 && u.canAttack(t)) continue;                                      // already shooting: a long climb is a waste
+      if (du < bestD) { bestD = du; best = h; }
+    }
+    if (!best) return null;
+    let hash = 0; for (const ch of String(u.id)) hash = (hash * 31 + ch.charCodeAt(0)) | 0;
+    const ang = (hash % 360) * Math.PI / 180, rad = best.r * (0.25 + ((hash >>> 8) % 50) / 100);
+    const x = best.x + Math.cos(ang) * rad, z = best.z + Math.sin(ang) * rad;
+    return w.walkable(x, z) ? { x, z } : { x: best.x, z: best.z };
+  }
+  // a hill to fall back onto: nearer to us than to them, not held by them, not far
+  retreatSpot(foes) {
+    const u = this.u, w = u.game.world; if (!w.hills.length || !foes.length) return null;
+    const opts = w.hillTops().filter((h) => {
+      const du = Math.hypot(u.pos.x - h.x, u.pos.z - h.z), df = Math.min(...foes.map((f) => Math.hypot(f.pos.x - h.x, f.pos.z - h.z)));
+      return du < 14 && df > h.r + 3 && df > du * 1.3;
+    });
+    if (!opts.length) return null;
+    const h = opts[Math.floor(Math.random() * opts.length)], ang = Math.random() * Math.PI * 2, rad = h.r * (0.2 + Math.random() * 0.5);
+    const x = h.x + Math.cos(ang) * rad, z = h.z + Math.sin(ang) * rad;
+    return w.walkable(x, z) ? { x, z } : { x: h.x, z: h.z };
+  }
   archerGoal(t, plan, general) {
     const u = this.u, g = u.game, w = g.world;
     if (!t) { this.goal = null; return; }
@@ -472,6 +520,13 @@ export class Brain {
     if (threat && !(lastStand && foes.length <= 1)) {
       const dx = u.pos.x - threat.pos.x, dz = u.pos.z - threat.pos.z, d = Math.hypot(dx, dz) || 1;
       this.goal = { x: u.pos.x + dx / d * 3, z: u.pos.z + dz / d * 3, tol: 0.3, run: 1.15 }; return;
+    }
+    // HIGH GROUND: a hill top near us that the enemy does not hold (and we reach first) is the place to shoot from
+    const top = plan.stance !== "fallback" && !g.endgame ? this.hillSpot(foes, t) : null;
+    if (top) {
+      const onTop = Math.hypot(u.pos.x - top.x, u.pos.z - top.z) < 1.0;
+      this.goal = onTop ? null : { x: top.x, z: top.z, tol: 0.6 };
+      this.settled = onTop; return;
     }
     const d = u.dist(t), los = w.lineClear(u.pos.x, u.pos.z, t.pos.x, t.pos.z);
     // far from the fight: walk with the formation (back line)

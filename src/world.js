@@ -5,7 +5,9 @@ import { MAP_W, MAP_H } from "./config.js";
 export const CELL = 1;                       // nav grid cell size
 const GW = MAP_W / CELL, GH = MAP_H / CELL;
 // cell flags
-export const FREE = 0, BLOCK = 1, FENCE = 2, WATER = 3;  // BLOCK stops movement + arrows, FENCE/WATER stop movement only (no hopping over water)
+export const FREE = 0, BLOCK = 1, FENCE = 2, WATER = 3, CLIFF = 4;  // BLOCK stops movement + arrows, FENCE/WATER/CLIFF stop movement only (no hopping over water / cliffs)
+const ROCK = new THREE.Color(0x8c7f6a);
+const smooth01 = (t) => { t = Math.max(0, Math.min(1, t)); return t * t * (3 - 2 * t); };
 
 function rng(seed) { // mulberry32
   return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
@@ -20,7 +22,7 @@ export function toonGradient() {
 }
 
 export class World {
-  constructor(scene, quality, seed = (Math.random() * 1e9) | 0, terrain = "village") {
+  constructor(scene, quality, seed = (Math.random() * 1e9) | 0, terrain = "village", opts = {}) {
     this.scene = scene; this.q = quality; this.rand = rng(seed); this.terrain = terrain;
     this.grid = new Uint8Array(GW * GH);
     // exact obstacle outlines for body collision (the 1 m grid stays for path finding and arrow line-of-sight)
@@ -28,9 +30,107 @@ export class World {
     this.group = new THREE.Group(); scene.add(this.group);
     this.grad = toonGradient();
     this.mat = (c) => new THREE.MeshToonMaterial({ color: c, gradientMap: this.grad });
+    // hills: only some battlefields (never the skirmish village): always on "hills", sometimes on open / forest / ruins
+    this.hills = [];
+    const nHills = opts.hills ?? (terrain === "hills" ? 2 : 0);   // the campaign map decides (and shows it in advance)
+    if (nHills && terrain !== "village") this.makeHills(nHills);
     this.buildGround();
+    if (this.hills.length) this.markCliffs();
     if (terrain === "village") this.buildVillage();
     else if (terrain !== "empty") this.buildTerrain(terrain);
+  }
+
+  // ---------- height (hills). 0 everywhere on flat battlefields.
+  // A hill: a flat top (wobbly ellipse) with gentle slopes on some sides and a steep cliff on others.
+  height(x, z) {
+    let best = 0;
+    for (const h of this.hills) {
+      const dx = x - h.x, dz = z - h.z;
+      if (Math.abs(dx) > h.reach || Math.abs(dz) > h.reach) continue;
+      const lx = dx * h.cos + dz * h.sin, lz = -dx * h.sin + dz * h.cos, a = Math.atan2(lz, lx);
+      const wob = 1 + 0.12 * Math.sin(3 * a + h.ph) + 0.06 * Math.sin(5 * a + h.ph * 2);
+      const rho = Math.hypot(lx / (h.rx * wob), lz / (h.rz * wob));
+      if (rho <= 1) { best = Math.max(best, h.h); continue; }
+      const sw = h.gentle + (h.steep - h.gentle) * this.cliffness(h, a), t = (rho - 1) / sw;
+      if (t < 1) best = Math.max(best, h.h * (1 - smooth01(t)));
+    }
+    return best;
+  }
+  cliffness(h, a) {   // 0 = gentle slope, 1 = cliff, smooth across ~15 degrees at the ends of each cliff arc
+    let c = 0;
+    for (const [c0, c1] of h.cliffs) {
+      let d = a - c0; while (d < 0) d += Math.PI * 2; while (d > Math.PI * 2) d -= Math.PI * 2;
+      const span = c1 - c0, e = 0.26;
+      if (d <= span) c = Math.max(c, Math.min(smooth01(d / e), smooth01((span - d) / e)));
+    }
+    return c;
+  }
+  hillMesh(h, mat) {
+    // tight bounds: where this hill actually rises
+    let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
+    for (let x = h.x - h.reach; x <= h.x + h.reach; x += 0.5) for (let z = h.z - h.reach; z <= h.z + h.reach; z += 0.5)
+      if (this.height(x, z) > 0.002) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+    x0 -= 0.75; x1 += 0.75; z0 -= 0.75; z1 += 0.75;
+    const st = 0.25, nx = Math.ceil((x1 - x0) / st) + 1, nz = Math.ceil((z1 - z0) / st) + 1;
+    const posA = new Float32Array(nx * nz * 3), colA = new Float32Array(nx * nz * 3), ys = new Float32Array(nx * nz), col = new THREE.Color();
+    for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+      const k = j * nx + i, x = x0 + i * st, z = z0 + j * st, y = this.height(x, z);
+      ys[k] = y; posA.set([x, y + 0.012, z], k * 3);
+      this.groundColor(x, z, y, col); colA.set([col.r, col.g, col.b], k * 3);
+    }
+    const idx = [];
+    for (let j = 0; j < nz - 1; j++) for (let i = 0; i < nx - 1; i++) {
+      const a = j * nx + i, b = a + 1, c = a + nx, d = c + 1;
+      if (Math.max(ys[a], ys[b], ys[c], ys[d]) < 0.002) continue;   // flat: the ground below shows
+      idx.push(a, c, b, b, c, d);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(posA, 3)); geo.setAttribute("color", new THREE.BufferAttribute(colA, 3));
+    geo.setIndex(idx); geo.computeVertexNormals();
+    const m = new THREE.Mesh(geo, mat); m.receiveShadow = true; m.castShadow = false;   // (self-shadow striped the cliff faces)
+    return m;
+  }
+  makeHills(n) {
+    const r = this.rand;
+    for (let i = 0, tries = 0; i < n && tries < 50; tries++) {
+      // in the middle band of the field (not on the spawn lines), left / right of the centre when there are two
+      const x = n === 2 ? (i ? 1 : -1) * (6 + r() * 7) : (r() - 0.5) * 18, z = (r() - 0.5) * 20;
+      const rx = 3.6 + r() * 2.6, rz = 2.8 + r() * 2, hh = 1.5 + r() * 0.8, rot = r() * Math.PI;
+      if (this.hills.some((o) => Math.hypot(o.x - x, o.z - z) < o.rx + rx + 5)) continue;
+      const cliffs = [], k = 1 + (r() < 0.5 ? 1 : 0);
+      for (let j = 0; j < k; j++) { const c0 = r() * Math.PI * 2; cliffs.push([c0, c0 + 1.1 + r() * 1.0]); }
+      // gentle: slope band ~ as wide as the hill is high x2.5 (normalised to the radius); steep: a near-vertical drop
+      const gentle = (hh * 2.6) / Math.min(rx, rz), steep = 0.18;
+      this.hills.push({ x, z, rx, rz, h: hh, cos: Math.cos(rot), sin: Math.sin(rot), ph: r() * 6, cliffs, gentle, steep,
+        reach: Math.max(rx, rz) * 1.25 * (1 + gentle) + 1 });
+      i++;
+    }
+  }
+  // the steep parts become CLIFF cells: path finding goes round them, bodies cannot cross
+  markCliffs() {
+    for (let cx = 1; cx < GW - 1; cx++) for (let cz = 1; cz < GH - 1; cz++) {
+      const [x, z] = this.cellCenter(cx, cz), q = 0.5;
+      const g = Math.max(Math.abs(this.height(x + q, z) - this.height(x - q, z)), Math.abs(this.height(x, z + q) - this.height(x, z - q)),
+        Math.abs(this.height(x + q, z + q) - this.height(x - q, z - q)) * 0.71, Math.abs(this.height(x + q, z - q) - this.height(x - q, z + q)) * 0.71);
+      if (g > 0.85 && this.get(cx, cz) === FREE) this.set(cx, cz, CLIFF);
+    }
+  }
+  // the top of a hill (for the AI): its centre, radius and height
+  hillTops() { return this.hills.map((h) => ({ x: h.x, z: h.z, r: Math.min(h.rx, h.rz) * 0.8, h: h.h })); }
+  // keep a body off cliff cells (the outlines in `shapes` do not include them)
+  pushOffCliffs(x, z, r) {
+    if (!this.hills.length) return [x, z];
+    const [cx, cz] = this.toCell(x, z);
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+      if (this.get(cx + dx, cz + dz) !== CLIFF) continue;
+      const [mx, mz] = this.cellCenter(cx + dx, cz + dz), hh = CELL / 2;
+      const qx = Math.max(mx - hh, Math.min(x, mx + hh)), qz = Math.max(mz - hh, Math.min(z, mz + hh));
+      const ox = x - qx, oz = z - qz, d = Math.hypot(ox, oz);
+      if (d >= r) continue;
+      if (d > 1e-5) { x += ox / d * (r - d); z += oz / d * (r - d); }
+      else { const [px, pz] = this.pushOut(x, z, r); x = px; z = pz; }
+    }
+    return [x, z];
   }
 
   // ---------- grid helpers
@@ -160,23 +260,35 @@ export class World {
   }
 
   // ---------- visuals
+  // grass colour at a point (shared by the flat ground and the hill meshes, so they meet without a seam)
+  groundColor(x, z, y, col) {
+    const hsh = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453, rn = hsh - Math.floor(hsh);
+    const n = Math.sin(x * 0.35) * Math.cos(z * 0.3) * 0.5 + Math.sin(x * 1.3 + z * 0.9) * 0.25 + rn * 0.25;
+    const edge = Math.max(Math.abs(x) - MAP_W / 2, Math.abs(z) - MAP_H / 2, 0);
+    col.setHSL(0.27 + n * 0.02, 0.5 - Math.min(edge, 8) * 0.03, 0.42 + n * 0.05 - Math.min(edge, 8) * 0.02);
+    if (y > 0.01) {
+      const q = 0.35, g = Math.max(Math.abs(this.height(x + q, z) - this.height(x - q, z)), Math.abs(this.height(x, z + q) - this.height(x, z - q))) / (2 * q);
+      col.offsetHSL(0, 0, Math.min(0.05, y * 0.025));                    // sunlit tops a touch lighter
+      col.lerp(ROCK, smooth01((g - 1.1) / 1.4) * 0.85);                  // bare rock only on the really steep faces
+      col.offsetHSL(0, 0, -smooth01((g - 0.4) / 0.9) * 0.04);            // slopes a shade darker
+    }
+    return col;
+  }
   buildGround() {
+    const hilly = this.hills.length > 0;
     const geo = new THREE.PlaneGeometry(MAP_W + 30, MAP_H + 30, 70, 86);
     geo.rotateX(-Math.PI / 2);
     const col = new THREE.Color(), cols = [], pos = geo.attributes.position;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i), z = pos.getZ(i);
-      const n = Math.sin(x * 0.35) * Math.cos(z * 0.3) * 0.5 + Math.sin(x * 1.3 + z * 0.9) * 0.25 + this.rand() * 0.25;
-      const edge = Math.max(Math.abs(x) - MAP_W / 2, Math.abs(z) - MAP_H / 2, 0);
-      col.setHSL(0.27 + n * 0.02, 0.5 - Math.min(edge, 8) * 0.03, 0.42 + n * 0.05 - Math.min(edge, 8) * 0.02);
-      cols.push(col.r, col.g, col.b);
-    }
+    for (let i = 0; i < pos.count; i++) { this.groundColor(pos.getX(i), pos.getZ(i), 0, col); cols.push(col.r, col.g, col.b); }
     geo.setAttribute("color", new THREE.Float32BufferAttribute(cols, 3));
-    const ground = new THREE.Mesh(geo, new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: this.grad }));
+    const gmat = new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: this.grad });
+    const ground = new THREE.Mesh(geo, gmat);
     ground.receiveShadow = true; ground.name = "ground";
     this.group.add(ground); this.ground = ground;
-    // dirt road through the village
-    const road = new THREE.Mesh(new THREE.PlaneGeometry(3.2, MAP_H + 30), new THREE.MeshToonMaterial({ color: 0xb59a6a, gradientMap: this.grad }));
+    // each hill: its own fine mesh (0.25 m) laid over the flat ground - crisp cliff edges, and the rest stays light
+    for (const h of this.hills) this.group.add(this.hillMesh(h, gmat));
+    // dirt road through the village (not where hills would cut it into jagged pieces)
+    const road = new THREE.Mesh(new THREE.PlaneGeometry(3.2, MAP_H + 30), new THREE.MeshToonMaterial({ color: 0xb59a6a, gradientMap: this.grad })); road.visible = !hilly;
     road.rotation.x = -Math.PI / 2; road.position.set(this.rand() * 6 - 3, 0.01, 0); road.receiveShadow = true;
     this.group.add(road);
     // map border (invisible walls in the grid, low stone line visually)
@@ -236,6 +348,7 @@ export class World {
     };
     const rocks = (n) => { for (let i = 0; i < n; i++) { const x = (r() - 0.5) * (MAP_W - 4), z = (r() - 0.5) * (MAP_H - 20); if (this.areaFree(x - 0.4, z - 0.4, x + 0.4, z + 0.4)) this.addRock(x, z); } };
     if (kind === "forest") { trees(22, 7); rocks(6); }
+    else if (kind === "hills") { trees(6, 3); rocks(8); }
     else if (kind === "open") { trees(2, 2); rocks(5); }
     else if (kind === "river") {
       const b1 = -12 + r() * 8, b2 = 4 + r() * 8;   // two bridges
@@ -272,7 +385,7 @@ export class World {
         const w = horiz ? len : 0.6, d = horiz ? 0.6 : len;
         if (!this.areaFree(x - w / 2 - 1, z - d / 2 - 1, x + w / 2 + 1, z + d / 2 + 1)) continue;
         const h = 0.9 + r() * 1.0;
-        const wall = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), this.mat(0xb3aa98)); wall.position.set(x, h / 2, z);
+        const wall = new THREE.Mesh(new THREE.BoxGeometry(w, h + 0.6, d), this.mat(0xb3aa98)); wall.position.set(x, (h + 0.6) / 2 - 0.6 + this.height(x, z), z);
         wall.castShadow = this.q.shadows; wall.receiveShadow = true; this.group.add(wall);
         this.markRect(x - w / 2 + 0.05, z - d / 2 + 0.05, x + w / 2 - 0.05, z + d / 2 - 0.05, BLOCK);
         this.shapes.push({ x, z, hw: w / 2 + 0.03, hd: d / 2 + 0.03 }); i++;
@@ -313,7 +426,7 @@ export class World {
     this.shapes.push(horiz ? { x: x + len / 2, z, hw: len / 2 + 0.07, hd: 0.07 } : { x, z: z + len / 2, hw: 0.07, hd: len / 2 + 0.07 });
   }
   addTree(x, z) {
-    const g = new THREE.Group(); g.position.set(x, 0, z);
+    const g = new THREE.Group(); g.position.set(x, this.height(x, z) - 0.05, z);
     const s = 0.8 + this.rand() * 0.5;
     const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.12 * s, 0.18 * s, 1.1 * s, 6), this.mat(0x7a5230));
     trunk.position.y = 0.55 * s; g.add(trunk);
@@ -331,7 +444,7 @@ export class World {
   addRock(x, z) {
     const s = 0.35 + this.rand() * 0.3;
     const m = new THREE.Mesh(new THREE.DodecahedronGeometry(s, 0), this.mat(0x8d9099));
-    m.position.set(x, s * 0.5, z); m.scale.y = 0.6; m.rotation.y = this.rand() * 6;
+    m.position.set(x, s * 0.5 + this.height(x, z) - 0.05, z); m.scale.y = 0.6; m.rotation.y = this.rand() * 6;
     m.castShadow = this.q.shadows; m.receiveShadow = true; this.group.add(m);
     this.markRect(x - s * 0.5, z - s * 0.5, x + s * 0.5, z + s * 0.5, BLOCK);
     this.shapes.push({ c: true, x, z, r: s * 0.8 });

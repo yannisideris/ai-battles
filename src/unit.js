@@ -17,7 +17,8 @@ export class Unit {
   constructor(game, team, type, x, z) {
     this.game = game; this.team = team; this.type = type;
     this.id = `${team[0]}${nextId++}`;
-    this.s = STATS[type];
+    // own copy (inherits the type's numbers): the range changes with the ground you stand on (high ground)
+    this.s = Object.create(STATS[type]); this.baseRange = STATS[type].range;
     // role flags (the AI and the player controls work on these, not on the type name)
     this.ranged = this.s.ranged || false;        // shoots: "arrow" (archer, ranger captain) or "magic" (mage)
     this.captain = !!this.s.captain;             // leads the army, gives orders
@@ -345,9 +346,10 @@ export class Unit {
     if (this.hop && this.alive) {
       const h = this.hop; h.t = Math.min(1, h.t + dt / 0.42);
       this.pos.x = h.fx + (h.tx - h.fx) * h.t; this.pos.z = h.fz + (h.tz - h.fz) * h.t;
-      this.root.position.set(this.pos.x, Math.sin(Math.PI * h.t) * 0.55, this.pos.z);
+      this.groundY = this.game.world.hills.length ? this.game.world.height(this.pos.x, this.pos.z) : 0;
+      this.root.position.set(this.pos.x, this.groundY + Math.sin(Math.PI * h.t) * 0.55, this.pos.z);
       this.root.rotation.y = this.facing;
-      if (h.t >= 1) { this.hop = null; this.root.position.y = 0; this.vel.set(0, 0, 0); this.play("idle", 0.1); }
+      if (h.t >= 1) { this.hop = null; this.root.position.y = this.groundY; this.vel.set(0, 0, 0); this.play("idle", 0.1); }
       return;
     }
     // white hit-flash (fades in ~0.16 s)
@@ -390,7 +392,16 @@ export class Unit {
       if (d < min && d > 1e-4) { const push = (min - d) / min * 3.2; v.x += dx / d * push; v.z += dz / d * push; }
     }
     this.vel.lerp(v, Math.min(1, dt * (this.isPlayer ? 20 : 10)));   // snappier control for the player
-    const nx = this.pos.x + this.vel.x * dt, nz = this.pos.z + this.vel.z * dt, w = this.game.world, r = this.radius * 0.8;
+    const w = this.game.world, r = this.radius * 0.8;
+    if (w.hills.length) {   // uphill is slower (a steep climb up to ~40% slower), downhill a little quicker
+      const sp = Math.hypot(this.vel.x, this.vel.z);
+      if (sp > 0.05) {
+        const h0 = w.height(this.pos.x, this.pos.z), h1 = w.height(this.pos.x + this.vel.x / sp * 0.4, this.pos.z + this.vel.z / sp * 0.4);
+        const grade = (h1 - h0) / 0.4, k = grade > 0 ? 1 - Math.min(0.4, grade * 0.55) : 1 + Math.min(0.1, -grade * 0.15);
+        this.vel.x *= k; this.vel.z *= k;
+      }
+    }
+    const nx = this.pos.x + this.vel.x * dt, nz = this.pos.z + this.vel.z * dt;
     // move, then resolve against the real obstacle outlines (sliding along walls happens naturally)
     this.pos.x = nx; this.pos.z = nz;
     // short step into the swing: applied straight to the position so it covers exactly the planned distance
@@ -412,14 +423,18 @@ export class Unit {
     }
     // solid obstacles: the body (radius + a small margin for shield / shoulders) stays out of their real outlines
     [this.pos.x, this.pos.z] = w.collide(this.pos.x, this.pos.z, this.radius + 0.06);
+    [this.pos.x, this.pos.z] = w.pushOffCliffs(this.pos.x, this.pos.z, this.radius);
+    this.groundY = w.hills.length ? w.height(this.pos.x, this.pos.z) : 0;
+    // high ground: archers / mages / the ranger reach further from up there (up to +25% on a full hill top)
+    if (this.ranged) this.s.range = this.baseRange * (1 + 0.25 * Math.min(1, this.groundY / 1.5));
     const speed = Math.hypot(this.vel.x, this.vel.z);
     if (speed > 0.3 && !(this.attackTimer > 0) && !(this.ranged && !this.isPlayer && this.busy())) this.wantFacing = Math.atan2(this.vel.x, this.vel.z);
     if (this.wantFacing !== undefined) this.facing += angDiff(this.wantFacing, this.facing) * Math.min(1, dt * (this.isPlayer ? 18 : 10));
-    this.root.position.copy(this.pos);
+    this.root.position.copy(this.pos); this.root.position.y = this.groundY;
     this.root.rotation.set(0, this.facing, 0);
     if (this.air) {   // thrown by a slam: a short low arc, leaning back away from the blow
       this.air.t += dt; const k = Math.min(1, this.air.t / this.air.dur);
-      this.root.position.y = Math.sin(Math.PI * k) * this.air.h;
+      this.root.position.y = this.groundY + Math.sin(Math.PI * k) * this.air.h;
       const lean = Math.sin(Math.PI * Math.min(1, k * 1.15)) * this.air.tilt;
       KNOCK_AXIS.set(this.lungeDir.z, 0, -this.lungeDir.x).normalize();   // up x push: tips the top along the push
       this.root.quaternion.premultiply(KNOCK_Q.setFromAxisAngle(KNOCK_AXIS, lean));

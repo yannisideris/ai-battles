@@ -20,6 +20,14 @@ export function drawMap(cv, s, reachable, rng) {
   vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(20,30,10,0.55)"); c.fillStyle = vg; c.fillRect(0, 0, W, H);
 
   // the ground under each battlefield
+  // hills first (under everything else): a raised mound with a steep side
+  for (const n of nodes.filter((n) => n.hills && n.kind !== "camp")) {
+    const [x, y] = P(n);
+    for (let i = 0; i < n.hills; i++) {
+      const hx = x + (n.hills === 2 ? (i ? 4.5 : -4.5) : 0) * U, hy = y - 2 * U;
+      hill(c, hx, hy, (n.hills === 2 ? 4.2 : 5) * U);
+    }
+  }
   const ground = { forest: "rgba(30,70,30,0.6)", village: "rgba(180,160,95,0.5)", open: "rgba(200,205,110,0.5)", river: "rgba(90,140,80,0.4)",
     graveyard: "rgba(75,65,90,0.6)", ruins: "rgba(135,128,112,0.55)" };
   for (const n of nodes) {
@@ -76,6 +84,14 @@ export function drawMap(cv, s, reachable, rng) {
   items.sort((p, q) => p[0] - q[0]).forEach(([, f]) => f());
 }
 
+function hill(c, x, y, s) {
+  const g = c.createRadialGradient(x - s * 0.3, y - s * 0.4, s * 0.1, x, y, s * 1.1);
+  g.addColorStop(0, "#9cc069"); g.addColorStop(0.7, "#6a8f45"); g.addColorStop(1, "rgba(60,80,40,0)");
+  c.fillStyle = g; c.beginPath(); c.ellipse(x, y, s * 1.1, s * 0.75, 0, 0, 7); c.fill();
+  c.fillStyle = "#8c7f6a"; c.strokeStyle = "#4a4236"; c.lineWidth = 1;   // the cliff face on the near side
+  c.beginPath(); c.moveTo(x - s * 0.2, y + s * 0.45); c.quadraticCurveTo(x + s * 0.4, y + s * 0.62, x + s * 0.9, y + s * 0.2);
+  c.lineTo(x + s * 0.95, y + s * 0.45); c.quadraticCurveTo(x + s * 0.4, y + s * 0.9, x - s * 0.2, y + s * 0.7); c.closePath(); c.fill(); c.stroke();
+}
 function tree(c, x, y, s, r) {
   c.fillStyle = "rgba(0,0,0,0.25)"; c.beginPath(); c.ellipse(x + s * 0.4, y + s * 0.5, s, s * 0.5, 0, 0, 7); c.fill();
   c.fillStyle = "#5a3d22"; c.fillRect(x - s * 0.15, y - s * 0.2, s * 0.3, s * 0.7);

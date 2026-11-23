@@ -19,6 +19,8 @@ const SIM = Number(params.get("sim")) || 0;
 // ?gallery=attack -> dev only: every unit model of both sides in two rows on an empty field, looping that clip
 // (&team=human|skeleton for one row up close)
 const GALLERY = params.get("gallery");
+// dev only: ?terrain=hills (&hills=1|2) puts a skirmish / sim on a campaign battlefield
+const DEV_TERRAIN = params.get("terrain"), DEV_HILLS = params.get("hills") != null ? Number(params.get("hills")) : undefined;
 const GALLERY_TYPES = ["captain", "captain_ranged", "captain_heavy", "soldier", "spearman", "brute", "shieldbearer", "scout", "monster", "archer", "mage", "support"];
 
 class Game {
@@ -140,7 +142,7 @@ class Game {
     Object.assign(this.sun.shadow.camera, { left: -16, right: 16, top: 16, bottom: -16, near: 1, far: 60 });
     this.sun.shadow.bias = -0.0008;
     this.scene.add(this.sun, this.sun.target);
-    this.world = new World(this.scene, this.q, undefined, GALLERY ? "empty" : this.campaignBattle?.terrain);
+    this.world = new World(this.scene, this.q, undefined, GALLERY ? "empty" : this.campaignBattle?.terrain ?? DEV_TERRAIN ?? undefined, { hills: this.campaignBattle?.hills ?? DEV_HILLS });
     this.armySpec = this.campaignBattle ? this.campaignBattle.armies : this.skirmishArmies();
     if (GALLERY) { const all = GALLERY_TYPES.map((type) => ({ type })); this.armySpec = { human: all, skeleton: all }; }
     await loadUnitModels(this.q, Object.entries(this.armySpec).flatMap(([team, list]) => list.map((e) => [team, e.type])));
@@ -206,7 +208,7 @@ class Game {
     for (let i = 0; i < n; i++) {
       if (i > 0) {
         for (const c of [...this.scene.children]) if (c !== this.sun && c !== this.sun.target && !c.isLight) this.scene.remove(c);
-        this.world = new World(this.scene, this.q);
+        this.world = new World(this.scene, this.q, undefined, DEV_TERRAIN ?? undefined, { hills: DEV_HILLS });
         this.spawnArmies(); this.arrows = []; this.time = 0; this.pending = []; this.ended = false; this.lastHitTime = 0; this.winner = null; this.lastKillerTeam = null;
         this.generals = { human: new General(this, "human"), skeleton: new General(this, "skeleton") };
       }
@@ -312,6 +314,8 @@ class Game {
     // archers wear no armour and carry no shield: a sword that reaches them hurts a lot more
     if (!ranged && t.soft && !att.ranged) dmg = Math.round(dmg * 1.75);
     if (att.dmgMul !== 1) dmg = Math.round(dmg * att.dmgMul);   // veterans
+    // high ground: a blow struck from clearly higher up (charging down a slope) lands harder
+    if (!ranged && (att.groundY || 0) - (t.groundY || 0) > 0.4) dmg = Math.round(dmg * 1.15);
     if (att.team !== this.settings.side) dmg = Math.max(1, Math.round(dmg * this.diff.dmg));   // difficulty
     this.lastHitTime = this.time;
     const killed = t.alive && t.hp <= dmg;
@@ -342,7 +346,7 @@ class Game {
   // floating combat text above a unit
   popup(u, text, kind) {
     if (this.muted) return;
-    const p = u.pos.clone(); p.y = 1.35 * u.s.scale; p.project(this.camera);
+    const p = u.pos.clone(); p.y = (u.groundY || 0) + 1.35 * u.s.scale; p.project(this.camera);
     const el = document.createElement("div"); el.className = `pop ${kind}`; el.textContent = text;
     el.style.left = `${(p.x + 1) / 2 * innerWidth + (Math.random() - 0.5) * 24}px`; el.style.top = `${(1 - p.y) / 2 * innerHeight}px`;
     $("bubbles").appendChild(el); setTimeout(() => el.remove(), 900);
@@ -465,7 +469,7 @@ class Game {
   pulse(x, z, r, color, dur = 0.5, delay = 0) {   // delay: wait for the moment in the animation
     if (this.muted) return;
     const m = new THREE.Mesh(new THREE.RingGeometry(0.75, 1, 32), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide }));
-    m.rotation.x = -Math.PI / 2; m.position.set(x, 0.06, z); this.scene.add(m);
+    m.rotation.x = -Math.PI / 2; m.position.set(x, this.world.height(x, z) + 0.06, z); this.scene.add(m);
     m.visible = delay <= 0; (this.fx ??= []).push({ m, t: -delay, dur, r });
   }
   updateFx(dt) {
@@ -486,7 +490,7 @@ class Game {
     const mesh = magic ? this.orbModel(from.team, from.ranged === "magic") : this.arrowModel(from.team);
     this.scene.add(mesh);
     // faint white streak behind the arrow so it reads at game distance
-    const trailGeo = new THREE.BufferGeometry().setFromPoints(Array.from({ length: 8 }, () => from.pos.clone().setY(0.9)));
+    const trailGeo = new THREE.BufferGeometry().setFromPoints(Array.from({ length: 8 }, () => from.pos.clone().setY((from.groundY || 0) + 0.9)));
     const trail = new THREE.Line(trailGeo, new THREE.LineBasicMaterial({ color: 0xfff8e8, transparent: true, opacity: 0.25 }));
     this.scene.add(trail);
     const d = Math.hypot(tx - from.pos.x, tz - from.pos.z);
@@ -504,7 +508,9 @@ class Game {
         continue;
       }
       a.t += dt / a.dur;
-      const k = Math.min(1, a.t), x = a.sx + (a.tx - a.sx) * k, z = a.sz + (a.tz - a.sz) * k, y = 0.9 + Math.sin(k * Math.PI) * a.h - k * 0.35;
+      const k = Math.min(1, a.t), x = a.sx + (a.tx - a.sx) * k, z = a.sz + (a.tz - a.sz) * k;
+      a.h0 ??= this.world.height(a.sx, a.sz); a.h1 ??= this.world.height(a.tx, a.tz);
+      const y = a.h0 + (a.h1 - a.h0) * k + 0.9 + Math.sin(k * Math.PI) * a.h - k * 0.35;
       const prev = a.mesh.position.clone();
       a.mesh.position.set(x, y, z);
       if (a.t > dt / a.dur) a.mesh.lookAt(prev.lerp(a.mesh.position, 2));
@@ -512,7 +518,7 @@ class Game {
       const pos = a.trail.geometry.attributes.position;
       for (let i = 0; i < 8; i++) { const p = a.hist[Math.min(i, a.hist.length - 1)]; pos.setXYZ(i, p.x, p.y, p.z); }
       pos.needsUpdate = true;
-      if (k < 0.97 && !a.blast && this.world.blocksArrow(x, z) && y < 2.4) { this.scene.remove(a.mesh, a.trail); a.trail.geometry.dispose(); a.dead = true; continue; }   // hit a wall / tree: gone
+      if (k < 0.97 && !a.blast && this.world.blocksArrow(x, z) && y - this.world.height(x, z) < 2.4) { this.scene.remove(a.mesh, a.trail); a.trail.geometry.dispose(); a.dead = true; continue; }   // hit a wall / tree: gone
       if (k >= 1 && a.blast) {   // the mage's blast: hurts every enemy around the point it lands on (less at the edge)
         this.pulse(x, z, a.blast, a.from.team === "human" ? 0xff8a2a : 0x6dff6a, 0.45); this.sfx("blast");
         for (const f of this.alive(this.enemyOf(a.from.team))) {
@@ -848,11 +854,11 @@ class Game {
     this.updateFx(dt);
     // camera follow
     const focus = SPECTATE ? this.battleCentre() : this.player.alive ? this.player.pos : (this.alive(this.settings.side)[0] || this.player).pos;
-    const want = focus.clone().add(this.camOffset());
+    const want = focus.clone().add(this.camOffset()); want.y += this.world.height(focus.x, focus.z);   // up on a hill, the camera goes up too
     this.camPos.lerp(want, Math.min(1, dt * (SPECTATE ? 4 : 9)));   // locked on the player
     if (this.marker) {
       this.marker.visible = this.player.alive && !SPECTATE;
-      this.marker.position.set(this.player.pos.x, 1.6 * this.player.s.scale + Math.sin(this.time * 4) * 0.08, this.player.pos.z);
+      this.marker.position.set(this.player.pos.x, (this.player.groundY || 0) + 1.6 * this.player.s.scale + Math.sin(this.time * 4) * 0.08, this.player.pos.z);
       this.marker.rotation.y += dt * 2;
     }
     this.camera.position.copy(this.camPos); this.camera.lookAt(this.camPos.clone().sub(this.camOffset()).add(new THREE.Vector3(0, 0.5, 0)));
@@ -864,7 +870,7 @@ class Game {
     // target marker
     const t = this.player.target;
     this.targetRing.visible = !!(t && t.alive && this.player.alive);
-    if (this.targetRing.visible) this.targetRing.position.set(t.pos.x, 0.03, t.pos.z);
+    if (this.targetRing.visible) this.targetRing.position.set(t.pos.x, (t.groundY || 0) + 0.03, t.pos.z);
     this.updateHud();
     this.updateBubbles(dt);
     this.situationLines(dt);
@@ -901,7 +907,7 @@ class Game {
     // the arrow sticks to one enemy (no flicker between two), but switches when another one is clearly closer now
     const closest = foes.sort((a, b) => this.player.dist(a) - this.player.dist(b))[0];
     if (!this.trackFoe || !this.trackFoe.alive || this.player.dist(closest) < this.player.dist(this.trackFoe) - 1.5) this.trackFoe = closest;
-    const p = this.trackFoe.pos.clone(); p.y = 0.8; p.project(this.camera);
+    const p = this.trackFoe.pos.clone(); p.y = (this.trackFoe.groundY || 0) + 0.8; p.project(this.camera);
     const sx = (p.x + 1) / 2 * innerWidth, sy = (1 - p.y) / 2 * innerHeight, m = 40;
     const onScreen = p.z < 1 && sx > m && sx < innerWidth - m && sy > m && sy < innerHeight - m;
     if (onScreen) { el.classList.add("hidden"); return; }
@@ -1008,7 +1014,7 @@ class Game {
     const host = $("bubbles");
     for (const b of this.bubbles ?? []) {
       if (!b.el) { b.el = document.createElement("div"); b.el.className = "bubble"; b.el.textContent = b.text; host.appendChild(b.el); }
-      const p = b.u.pos.clone(); p.y = 1.6; p.project(this.camera);
+      const p = b.u.pos.clone(); p.y = (b.u.groundY || 0) + 1.6; p.project(this.camera);
       b.el.style.left = `${(p.x + 1) / 2 * innerWidth}px`; b.el.style.top = `${(1 - p.y) / 2 * innerHeight}px`;
       if (this.time > b.until) { b.el.remove(); b.dead = true; }
     }

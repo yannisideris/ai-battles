@@ -1,7 +1,7 @@
 // Campaign: a random overmap of battles to the enemy castle, an army that carries over (veterans, coins, shop),
 // one autosave (after the shop) and a retry from the map after a defeat. Decisions in docs/campaign.md. The battle itself is the normal Game, started with
 // game.campaignBattle = { armies, terrain, spawn, kind, defendT }.
-import { CAPTAIN_TYPES, QUALITY, STATS } from "./config.js";
+import { CAPTAIN_TYPES, QUALITY, STATS, ROSTER } from "./config.js";
 import { unitPortraits, UnitPreview } from "./assets.js";
 import { drawMap } from "./overmap.js";
 import { MapDiorama } from "./overmap3d.js";
@@ -27,6 +27,7 @@ const LIMIT = { monster: 1, support: 2, mage: 3 };
 
 const T = {
   el: {
+    yourArmy: "Ο στρατός σου", sell: "Επιστροφή", back2: "Πίσω",
     title: "Εκστρατεία", newC: "Νέα εκστρατεία", contC: "Συνέχεια", sure: "Σίγουρα; Νέος χάρτης", lost: "Ήττα",
     lostSub: "Ο στρατός σου γυρίζει στον χάρτη, όπως ήταν πριν ξεκινήσει για τη μάχη.", toMap: "Στον χάρτη", load: "Φόρτωση", back: "Πίσω", empty: "κενή", auto: "Αυτόματη",
     slot: (s) => (s === "auto" ? "Αυτόματη" : `Θέση ${s}`), save: "Αποθήκευση", saved: "Αποθηκεύτηκε", menu: "Μενού",
@@ -49,6 +50,7 @@ const T = {
     },
   },
   en: {
+    yourArmy: "Your army", sell: "Refund", back2: "Back",
     title: "Campaign", newC: "New campaign", contC: "Continue", sure: "Sure? New map", lost: "Defeat",
     lostSub: "Your army goes back to the map, as it was before it set off for the battle.", toMap: "To the map", load: "Load", back: "Back", empty: "empty", auto: "Auto",
     slot: (s) => (s === "auto" ? "Autosave" : `Slot ${s}`), save: "Save", saved: "Saved", menu: "Menu",
@@ -142,20 +144,22 @@ function makeMap(seed) {
   for (const col of cols) for (const n of col) {
     if (n.col === 0) { n.kind = "camp"; continue; }
     const last = n.col === COLS - 1;
-    let kind = last ? "castle" : pickR(r, ["normal", "normal", "normal", "ambush", "defend", "elite"]);
-    if (!last && n.col <= 3 && r() < 0.12) kind = "elite";
-    let budget = (230 + n.col * 85) * (0.72 + r() * 0.65);
-    if (kind === "elite") budget *= 1.5 + (n.col <= 3 ? 0.35 : 0);
-    if (kind === "defend") budget *= 1.3;
-    if (last) budget = (230 + n.col * 85) * 1.45;
+    // no planned easy or hard roads: every battle's strength is just random around its step's level
+    const kind = last ? "castle" : pickR(r, ["normal", "normal", "normal", "ambush", "defend"]);
+    // plenty of random, but steadier in the first two columns (a bad roll there should not wall you in)
+    // the strength climbs faster toward the end: reaching (and taking) the castle should be something exceptional
+    const base = 230 + n.col * 85 + n.col * n.col * 7;
+    let budget = base * (n.col <= 2 ? 0.62 + r() * 0.35 : 0.72 + r() * 0.65);   // (column 2 comes right after the bloody opening)
+    if (kind === "defend") budget *= 1.2;
+    if (last) budget = base * 1.3;
     n.kind = kind;
     n.terrain = last ? "ruins" : pickR(r, TERRAINS);
     // high ground only on some battlefields: always on "hills", now and then on open / forest / ruins
     n.hills = n.terrain === "hills" ? 2 : ["open", "forest", "ruins"].includes(n.terrain) && r() < 0.35 ? 1 : 0;
     n.theme = last ? "legion" : pickR(r, Object.keys(THEMES));
     n.budget = Math.round(budget);
-    n.army = enemyArmy(n.budget, r, last ? 3 : kind === "elite" && r() < 0.5 ? 2 : 1, n.theme);
-    n.reward = Math.round((n.budget * 0.3 * (kind === "elite" ? 1.6 : 1) * (last ? 2 : 1)) / 5) * 5;
+    n.army = enemyArmy(n.budget, r, last ? 3 : budget > base * 1.2 && r() < 0.4 ? 2 : 1, n.theme);   // a strong roll may bring a second captain
+    n.reward = Math.round((n.budget * 0.27 * (last ? 2 : 1)) / 5) * 5;
     if (kind === "defend") n.defendT = 120 + Math.round(r() * 2) * 30;
   }
   return { cols, edges };
@@ -180,7 +184,26 @@ export class Campaign {
   hide() { this.el.classList.add("hidden"); }
   toMenu() { this.hide(); this.game.campaignBattle = null; document.getElementById("menu").classList.remove("hidden"); }
 
+  // ---------------------------------------------------------------- the skirmish ("Battle!"): a budget, the shop, then the fight
+  // The budget: small / large, or random by default (the player is not told which). The enemy gets about the same
+  // budget and builds its army blind - it never sees what you bought.
+  skirmishShop() {
+    this.mode = "skirmish";
+    const b = this.game.settings.budget || "random", rnd = (a, z) => Math.round((a + Math.random() * (z - a)) / 5) * 5;
+    const coins = b === "low" ? rnd(300, 380) : b === "high" ? rnd(620, 760) : rnd(300, 760);
+    this.state = { side: this.game.settings.side, coins, budget: coins, roster: [], nextId: 1, lead: null, won: 0 };
+    this.lastResult = null; this.campScreen();
+  }
+  startSkirmish() {
+    const g = this.game, s = this.state, side = s.side, foe = side === "human" ? "skeleton" : "human";
+    const themes = Object.keys(THEMES), enemy = enemyArmy(Math.round(s.budget * (0.9 + Math.random() * 0.2)), Math.random, 1, themes[Math.floor(Math.random() * themes.length)]);
+    const mine = this.field().map((e) => ({ type: e.type, vet: 0, id: e.id, lead: e.id === s.lead }));
+    g.campaignBattle = { armies: { [side]: mine, [foe]: enemy }, terrain: "village", hills: 0, spawn: null, kind: "skirmish" };
+    g.settings.role = "captain";
+    this.hide(); g.start();
+  }
   openMenu() {
+    this.mode = "campaign";
     const t = this.t, m = this.readSave();
     const info = m ? ` <small>${this.name(m.roster.find((e) => e.id === m.lead)?.type || "soldier", m.side)} · ${m.won} ${t.battle} · ${m.coins} ${t.coins}</small>` : "";
     this.show(`<h1>${t.title}</h1>
@@ -193,21 +216,42 @@ export class Campaign {
   readSave() { try { return JSON.parse(localStorage.getItem(KEY("auto"))); } catch { return null; } }
   save() { try { localStorage.setItem(KEY("auto"), JSON.stringify(this.state)); } catch {} }
   resume() {
+    this.mode = "campaign";
     const s = this.readSave(); if (!s) { this.newCampaign(); return; }
     this.state = s; this.lastResult = null;
     this.game.settings.side = s.side; this.game.settings.difficulty = s.difficulty;
+    if (!s.won) { this.openingBattle(); return; }   // not past the first battle yet: straight into it again
     this.mapScreen();
   }
 
   newCampaign() {
+    this.mode = "campaign";
+    this.state = this.makeState(); this.lastResult = null; this.save();
+    this.openingBattle();
+  }
+  openingBattle() {
+    const n = this.state.map.cols[1].find((x) => x.opening) || this.next()[0];
+    this.show(""); this.startBattle(n);
+  }
+  makeState() {
     const g = this.game, side = g.settings.side, seed = (Math.random() * 2 ** 31) | 0;
     let nid = 1;
     const e = (type) => ({ id: nid++, type, vet: 0, field: true });
-    const roster = [e(g.settings.captain || "captain"), ...Array.from({ length: 6 }, () => e("soldier")), ...Array.from({ length: 4 }, () => e("archer"))];
-    this.state = { v: 1, seed, side, difficulty: g.settings.difficulty, coins: 80, won: 0, map: makeMap(seed), pos: 0, visited: [0],
+    // the classic army, as in the original game: captain, 8 soldiers, 7 archers
+    const roster = ROSTER.map(([type], i) => e(i === 0 ? g.settings.captain || "captain" : type));
+    const map = makeMap(seed);
+    // the opening battle (first column): the original game's battle - classic armies in the village
+    const open = map.cols[1][Math.floor(Math.random() * map.cols[1].length)];
+    Object.assign(open, { kind: "normal", terrain: "village", hills: 0, theme: "legion", budget: 435, reward: 240,   // (the first win brings reinforcements: rebuild after a bloody opening)
+      army: ROSTER.map(([type]) => ({ type, vet: 0 })), opening: true });
+    // the first column is just the opening battle: the others go, and it opens onto the whole second column
+    const gone = new Set(map.cols[1].filter((n) => n !== open).map((n) => n.id));
+    map.cols[1] = [open]; open.y = 45;
+    map.edges = map.edges.filter(([x, y]) => !gone.has(x) && !gone.has(y) && !(x === 0 && y !== open.id));
+    if (!map.edges.some(([x, y]) => x === 0 && y === open.id)) map.edges.push([0, open.id]);
+    for (const n of map.cols[2]) if (!map.edges.some(([x, y]) => x === open.id && y === n.id)) map.edges.push([open.id, n.id]);
+    return { v: 1, seed, side, difficulty: g.settings.difficulty, coins: 0, won: 0, map, pos: 0, visited: [0],
       roster, nextId: nid, lead: roster[0].id };
-    this.lastResult = null; this.save();
-    this.mapScreen();
   }
   node(id) { for (const c of this.state.map.cols) for (const n of c) if (n.id === id) return n; return null; }
   next() { return this.state.map.edges.filter(([a]) => a === this.state.pos).map(([, b]) => this.node(b)); }
@@ -275,10 +319,12 @@ export class Campaign {
         ${r.promoted.length ? `${t.promoted}: ${r.promoted.map((e) => `${this.name(e.type)} ${"★".repeat(e.vet)}`).join(", ")}<br>` : ""}
         ${r.fallen.length ? `${t.fallen}: ${r.fallen.map((e) => this.name(e.type)).join(", ")}` : ""}</div>` : "";
     const nField = this.field().length, nCap = s.roster.filter((e) => isCap(e.type)).length;
+    const sk = this.mode === "skirmish";
     const rows = [...s.roster].sort((a, b) => (isCap(b.type) - isCap(a.type)) || a.type.localeCompare(b.type)).map((e) => `
       <div class="unit ${e.field ? "" : "res"}"><img class="ico" data-ico="${e.type}" alt=""><span class="nm">${this.name(e.type)} <span class="stars">${"★".repeat(e.vet || 0)}</span>${e.id === s.lead ? ` <b class="lead">${t.lead}</b>` : ""}</span>
         <button data-act="field" data-id="${e.id}">${e.field ? t.inField : t.reserve}</button>
-        ${isCap(e.type) && e.id !== s.lead ? `<button data-act="lead" data-id="${e.id}">${t.makeLead}</button>` : ""}</div>`).join("");
+        ${isCap(e.type) && e.id !== s.lead ? `<button data-act="lead" data-id="${e.id}">${t.makeLead}</button>` : ""}
+        ${sk ? `<button data-act="sell" data-id="${e.id}" title="${t.sell}">✕</button>` : ""}</div>`).join("");
     const shop = SHOP.map((type) => {
       const no = PRICE[type] > s.coins || (isCap(type) && nCap >= MAX_CAPTAINS);
       return `<button data-act="buy" data-type="${type}" ${no ? "disabled" : ""}><img class="ico" data-ico="${type}" alt="">${this.name(type)} <small>${PRICE[type]}</small></button>`;
@@ -286,8 +332,8 @@ export class Campaign {
     this.show(`${res}<div class="maphead"><span><b>${s.coins}</b> ${t.coins}</span><span>${nField}/${MAX_FIELD} ${t.inField} · ${t.capMax}</span></div>
       <h3>${t.shop}</h3><div class="shopwrap"><div class="shop">${shop}</div>
         <div class="prev"><canvas id="unitprev"></canvas><div id="prevtxt"></div></div></div>
-      <h3>${t.roster}</h3><div class="roster">${rows}</div>
-      <button class="big" data-act="cont">${t.cont}</button>`);
+      <h3>${sk ? t.yourArmy : t.roster}</h3><div class="roster">${rows}</div>
+      <div class="bar"><button class="big" data-act="cont">${sk ? t.fight : t.cont}</button>${sk ? `<button data-act="menu">${t.back2}</button>` : ""}</div>`);
     this.bind({
       buy: (b) => {
         const type = b.dataset.type; if (PRICE[type] > s.coins) return;
@@ -302,7 +348,13 @@ export class Campaign {
         e.field = !e.field; this.fixLead(); this.campScreen();
       },
       lead: (b) => { const e = s.roster.find((x) => x.id === Number(b.dataset.id)); s.lead = e.id; e.field = true; this.campScreen(); },
-      cont: () => { if (!this.field().length) { this.flash(t.noField); return; } this.lastResult = null; this.save(); this.mapScreen(); },
+      cont: () => {
+        if (!this.field().length) { this.flash(t.noField); return; }
+        if (sk) { this.startSkirmish(); return; }
+        this.lastResult = null; this.save(); this.mapScreen();
+      },
+      sell: (b) => { const e = s.roster.find((x) => x.id === Number(b.dataset.id)); s.coins += PRICE[e.type]; s.roster = s.roster.filter((x) => x !== e); this.fixLead(); this.campScreen(); },
+      menu: () => this.toMenu(),
     });
     this.fillIcons();
     // the big turning model of the unit you point at (mouse) or are on (pad / keys)
@@ -353,6 +405,13 @@ export class Campaign {
   startBattle(n) {
     const g = this.game, s = this.state, side = s.side, foe = this.enemy();
     this.fighting = n;
+    g.campaignBattle = this.battleSpec(n);
+    g.settings.role = "captain";
+    this.hide();
+    g.start();
+  }
+  battleSpec(n) {
+    const s = this.state, side = s.side, foe = this.enemy();
     const mine = this.field().map((e) => ({ type: e.type, vet: e.vet, id: e.id, lead: e.id === s.lead }));
     const armies = { [side]: mine, [foe]: n.army.map((e) => ({ ...e })) };
     let spawn = null;
@@ -361,16 +420,20 @@ export class Campaign {
       const z = 0.25 * (side === "human" ? 27 : -27), from = Math.random() < 0.5 ? -1 : 1;
       spawn = { [side]: { x: 0, z, facing: side === "human" ? Math.PI : 0 }, [foe]: { x: from * 15, z: z * 0.6, facing: from < 0 ? Math.PI / 2 : -Math.PI / 2 } };
     }
-    g.campaignBattle = { armies, terrain: n.terrain, hills: n.hills || 0, spawn, kind: n.kind, defendT: n.defendT || 0 };
-    g.settings.role = "captain";
-    this.hide();
-    g.start();
+    return { armies, terrain: n.terrain, hills: n.hills || 0, spawn, kind: n.kind, defendT: n.defendT || 0 };
   }
   // called by Game.finish
   afterBattle(won, info) {
-    const s = this.state, n = this.fighting; this.fighting = null;
+    const n = this.fighting; this.fighting = null;
     this.game.campaignBattle = null;
     if (!won) { this.defeat(); return; }
+    this.applyWin(n, info);
+    if (n.kind === "castle") { this.victory(); try { localStorage.removeItem(KEY("auto")); } catch {} return; }
+    this.campScreen();   // (saved when you close it)
+  }
+  // a won battle: veterans, the fallen, coins, the pawn moves on (shared by the game and the simulator)
+  applyWin(n, info) {
+    const s = this.state;
     const alive = new Set(info.alive), fallen = [], promoted = [];
     for (const e of this.field()) {
       if (alive.has(e.id)) { if ((e.vet || 0) < 3) { e.vet = (e.vet || 0) + 1; promoted.push(e); } }
@@ -382,8 +445,57 @@ export class Campaign {
     const coins = n.reward + surv + fast;
     s.coins += coins; s.won++; s.pos = n.id; s.visited.push(n.id);
     this.lastResult = { coins, base: n.reward, survivors: alive.size, surv, fast, fallen, promoted };
-    if (n.kind === "castle") { this.victory(); try { localStorage.removeItem(KEY("auto")); } catch {} return; }
-    this.campScreen();   // (saved when you close it)
+  }
+
+  // ---------------------------------------------------------------- dev: whole campaigns played headless (?campsim=N)
+  // A sensible player: keeps a core (soldiers + archers), adds a few specials, takes the easier road most of the
+  // time (now and then a bold one), retries from the autosave after a defeat (gives up after 6 tries at one node).
+  shopSim() {
+    const s = this.state, has = (t) => s.roster.filter((e) => e.type === t).length;
+    const want = () => {
+      if (has("soldier") < 6) return "soldier";
+      if (has("archer") < 4) return "archer";
+      if (s.coins >= 160 && !has("monster")) return "monster";
+      return ["spearman", "shieldbearer", "mage", "support", "brute", "archer", "soldier", "spearman"][s.won % 8];
+    };
+    for (let guard = 0; guard < 30; guard++) {
+      const t = want(); if (PRICE[t] > s.coins || s.roster.length >= MAX_FIELD + 6) break;   // a reserve of up to 6
+      s.coins -= PRICE[t]; s.roster.push({ id: s.nextId++, type: t, vet: 0, field: true });
+    }
+    // the best 16 go into battle (captains, then by worth: veterans and specials first)
+    const best = [...s.roster].sort((x, y) => (isCap(y.type) - isCap(x.type)) || unitValue(y) - unitValue(x)).slice(0, MAX_FIELD);
+    s.roster.forEach((e) => { e.field = best.includes(e); }); this.fixLead();
+  }
+  pickSim(retry) {
+    const nx = this.next(); if (!nx.length) return null;
+    const ratio = (n) => n.budget / Math.max(1, armyValue(this.field()));
+    const sorted = [...nx].sort((a, b) => ratio(a) - ratio(b));
+    return Math.random() < 0.2 && !retry ? sorted[sorted.length - 1] : sorted[0];
+  }
+  async simulate(runs) {
+    const out = [];
+    for (let k = 0; k < runs; k++) {
+      this.state = this.makeState(); this.shopSim();
+      let saved = JSON.stringify(this.state), tries = 0, defeats = 0, log = [];
+      for (let guard = 0; guard < 40; guard++) {
+        const n = this.state.won ? this.pickSim(tries > 0) : this.state.map.cols[1][0]; if (!n) break;
+        const r = await this.game.runCampaignBattle(this.battleSpec(n));
+        if (!r.won) {
+          defeats++; tries++; log.push(`L${n.col}${n.kind[0]}`);
+          if (tries > 6) break;
+          this.state = JSON.parse(saved); continue;
+        }
+        tries = 0; this.applyWin(n, r);
+        log.push(`W${n.col}${n.kind[0]}(${this.field().length},${this.state.coins})`);
+        if (n.kind === "castle") break;
+        this.shopSim(); saved = JSON.stringify(this.state);
+      }
+      const won = this.state.won, castle = this.node(this.state.pos)?.kind === "castle";
+      out.push({ castle, won, defeats, army: this.state.roster.length, coins: this.state.coins, log: log.join(" ") });
+      document.getElementById("general-line").textContent = `CAMPSIM ${k + 1}/${runs}: castle ${out.filter((o) => o.castle).length}`;
+    }
+    window.__campSim = out; console.log("[CAMPSIM]", JSON.stringify(out));
+    return out;
   }
   defeat() {
     const t = this.t;

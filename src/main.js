@@ -16,6 +16,8 @@ const TEST_SECONDS = Number(params.get("test")) || 0;
 const SPECTATE = !!params.get("spectate");
 // ?sim=20 -> run 20 battles headless (no rendering, no sound) and report who wins; for balance checks
 const SIM = Number(params.get("sim")) || 0;
+// ?campsim=10 -> play 10 whole campaigns headless with a simple player (dev: economy / difficulty check)
+const CAMPSIM = Number(params.get("campsim")) || 0;
 // ?gallery=attack -> dev only: every unit model of both sides in two rows on an empty field, looping that clip
 // (&team=human|skeleton for one row up close)
 const GALLERY = params.get("gallery");
@@ -27,7 +29,7 @@ class Game {
   constructor() {
     this.canvas = $("view");
     this.input = new Input();
-    this.settings = { side: "human", role: "captain", lang: "el", quality: "medium", difficulty: "normal", army: "classic", captain: "captain" };
+    this.settings = { side: "human", role: "captain", lang: "el", quality: "medium", difficulty: "normal", army: "classic", captain: "captain", budget: "random" };
     for (const k of ["side", "role", "quality", "lang", "difficulty", "army", "captain"]) if (params.get(k)) this.settings[k] = params.get(k);   // e.g. ?role=soldier for quick tests
     this.running = false;
     try { speechSynthesis.getVoices(); speechSynthesis.addEventListener("voiceschanged", () => speechSynthesis.getVoices()); } catch {}   // start loading the voice list early
@@ -37,7 +39,7 @@ class Game {
   }
 
   setupMenu() {
-    for (const b of document.querySelectorAll("#menu button[data-side],#menu button[data-lang],#menu button[data-difficulty],#menu button[data-army],#menu button[data-captain]")) {
+    for (const b of document.querySelectorAll("#menu button[data-side],#menu button[data-lang],#menu button[data-difficulty],#menu button[data-army],#menu button[data-captain],#menu button[data-budget]")) {
       const k = Object.keys(b.dataset)[0];
       b.onclick = () => {
         document.querySelectorAll(`#menu button[data-${k}]`).forEach((x) => x.classList.remove("sel"));
@@ -49,7 +51,7 @@ class Game {
       }
     }
     this.captainLabels();
-    $("start").onclick = () => this.start();
+    $("start").onclick = () => this.campaign.skirmishShop();
     $("again").onclick = () => { $("end").classList.add("hidden"); $("menu").classList.remove("hidden"); };
     if (params.get("auto")) setTimeout(() => this.start(), 50);
     this.menuPad();
@@ -162,6 +164,7 @@ class Game {
     this.input.pressed.clear(); this.paused = false; this.orderMenu = null; $("paused").classList.add("hidden");
     this.startedAt = performance.now();
     if (SIM) { this.runSims(SIM); return; }
+    if (CAMPSIM) { this.muted = true; this.running = false; this.player.setPlayer(false); this.campaign.simulate(CAMPSIM); return; }
     if (GALLERY) { this.gallery(GALLERY); return; }
     this.speak("foe", "start", { priority: true });
     this.pending.push({ at: 3.2, fn: () => this.speak("ally", "start", { priority: true }) });
@@ -200,6 +203,21 @@ class Game {
     requestAnimationFrame(loop);
   }
   // headless balance check: AI vs AI, fixed 20 Hz steps, nothing drawn
+  // one campaign battle, headless (for ?campsim): returns { won, alive (roster ids), time }
+  async runCampaignBattle(cb) {
+    this.campaignBattle = cb; this.armySpec = cb.armies;
+    for (const c of [...this.scene.children]) if (c !== this.sun && c !== this.sun.target && !c.isLight) this.scene.remove(c);
+    this.world = new World(this.scene, this.q, undefined, cb.terrain, { hills: cb.hills });
+    await loadUnitModels(this.q, Object.entries(cb.armies).flatMap(([team, list]) => list.map((e) => [team, e.type])));
+    this.spawnArmies(); this.arrows = []; this.time = 0; this.pending = []; this.ended = false; this.lastHitTime = 0; this.winner = null; this.lastKillerTeam = null;
+    this.generals = { human: new General(this, "human"), skeleton: new General(this, "skeleton") };
+    this.player.setPlayer(false);
+    for (let i = 0; !this.ended && this.time < 1500; i++) { this.step(0.05); if (i % 400 === 399) await new Promise((r) => setTimeout(r, 0)); }
+    const won = this.ended && this.winner === this.settings.side;
+    const alive = this.alive(this.settings.side).map((u) => u.entry?.id).filter((x) => x != null);
+    this.campaignBattle = null;
+    return { won, alive, time: this.time };
+  }
   async runSims(n) {
     this.muted = true; this.running = false;
     const res = { human: 0, skeleton: 0, unfinished: 0 }, details = [];
@@ -398,7 +416,7 @@ class Game {
     if (!this.running) return;
     this.running = false;
     this.renderer.render(this.scene, this.camera);
-    if (this.campaignBattle) {
+    if (this.campaignBattle && this.campaignBattle.kind !== "skirmish") {
       const alive = this.alive(this.settings.side).map((u) => u.entry?.id).filter((x) => x != null);
       this.campaign.afterBattle(won, { alive, time: this.time });
       return;

@@ -598,7 +598,8 @@ export class Campaign {
   // ---------------------------------------------------------------- input: mouse, arrow keys, gamepad
   bind(acts) {
     this.acts = acts;
-    for (const b of this.body.querySelectorAll("button[data-act]")) b.onclick = () => this.acts[b.dataset.act]?.(b);
+    // (a click / tap moves the pad / keys focus there too, so a redraw keeps it on that button)
+    for (const b of this.body.querySelectorAll("button[data-act]")) b.onclick = () => { const i = this.buttons().indexOf(b); if (i >= 0) this.focus = i; this.acts[b.dataset.act]?.(b); };
   }
   buttons() { return [...this.body.querySelectorAll("button:not([disabled])")]; }
   markFocus() {

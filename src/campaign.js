@@ -183,7 +183,7 @@ export class Campaign {
   // ---------------------------------------------------------------- screens
   show(html) {
     document.getElementById("menu").classList.add("hidden"); document.getElementById("end").classList.add("hidden");
-    this.el.classList.remove("hidden"); this.body.innerHTML = html; this.focus = 0;
+    this.el.classList.remove("hidden"); this.body.innerHTML = html; this.focus = 0; this.body.classList.remove("shoppanel");
     this.armed = false; this.shownAt = performance.now();   // the press that opened this screen must not also click in it
     this.markFocus();
   }
@@ -348,6 +348,7 @@ export class Campaign {
         <div class="prev"><canvas id="unitprev"></canvas><div id="prevtxt"></div></div></div>
       <h3>${sk ? t.yourArmy : t.roster}</h3><div class="roster">${rows}</div>
       <div class="bar"><button class="big" data-act="cont">${sk ? t.fight : t.cont}</button>${sk ? `<button data-act="menu">${t.back2}</button>` : ""}</div>`);
+    this.body.classList.add("shoppanel");   // the shop / army screen: narrower (the model on top reads best so)
     this.bind({
       buy: (b) => {
         const type = b.dataset.type; if (PRICE[type] > s.coins) return;

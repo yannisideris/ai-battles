@@ -6,6 +6,7 @@ import { Unit, rint, angDiff, HEAVY_CHARGE } from "./unit.js";
 import { Input } from "./input.js";
 import { General, Brain, ORDERS } from "./ai.js";
 import { LINES, UI } from "./lines.js";
+import { CAPTAIN_LINES } from "./captainLines.js";
 import { Campaign } from "./campaign.js";
 
 const $ = (id) => document.getElementById(id);
@@ -1006,9 +1007,13 @@ class Game {
     const gap = who === "foe" ? 16 : 6, hardGap = who === "foe" ? 6 : 3;
     const since = this.time - this.spoke[who];
     if (!force && (since < hardGap || (!priority && since < gap))) return false;
-    const pool = LINES[this.settings.lang]?.[team]?.[who]?.[event];
+    // the newer captains have lines (and a character) of their own; the first captain keeps the side's lines
+    const own = CAPTAIN_LINES[this.settings.lang]?.[team]?.[cap.type]?.[who]?.[event];
+    let pool = own?.length ? own : LINES[this.settings.lang]?.[team]?.[who]?.[event];
     if (!pool || !pool.length) return false;
-    const key = `${team}.${who}.${event}`, recent = (this.recent[key] ??= []);
+    // the older lines were written for the village: away from it, leave out the ones that name it
+    if (this.world?.terrain !== "village") { const off = pool.filter((l) => !/χωρι|village/i.test(l)); if (off.length) pool = off; else return false; }
+    const key = `${team}.${own?.length ? cap.type : ""}.${who}.${event}`, recent = (this.recent[key] ??= []);
     const fresh = pool.filter((l) => !recent.includes(l));
     const text = pick(fresh.length ? fresh : pool);
     recent.push(text); if (recent.length > Math.min(4, pool.length - 1)) recent.shift();

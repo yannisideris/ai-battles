@@ -61,7 +61,6 @@ body:has(#menu:not(.hidden)) #hud, body:has(#camp:not(.hidden)) #hud { visibilit
 /* end screen: centred, readable result line */
 #end .panel { text-align: center; min-width: 380px; }
 #end .panel .big { display: block; width: 100%; margin-top: 8px; }
-#again-sub { margin: 0 0 6px; opacity: .85; }
 #again-back { margin-top: 12px; }
 .padnav #end button.padfocus { background: #f1c40f; border-color: #f1c40f; color: #111; }
 .unit .cnt { color: #f1c40f; }

@@ -470,7 +470,6 @@ class Game {
     $("same-army").textContent = el ? "Με τον ίδιο στρατό" : "With the same army";
     $("change-army").textContent = el ? "Αλλαγή στρατού" : "Change my army";
     $("again-back").textContent = el ? "Πίσω" : "Back";
-    $("again-sub").textContent = el ? "Ίδιοι αντίπαλοι, ίδιο πεδίο μάχης." : "Same enemies, same battlefield.";
     $("end-main").classList.remove("hidden"); $("end-again").classList.add("hidden");
     // "Battle!": the same battle again (same armies, same battlefield)
     this.lastSkirmish = this.campaignBattle?.kind === "skirmish" ? JSON.parse(JSON.stringify(this.campaignBattle)) : null;

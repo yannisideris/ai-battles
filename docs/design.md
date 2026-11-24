@@ -125,7 +125,7 @@
 
 ## 13. Δημοσίευση
 
-- Repo: `github.com/yannisideris/ai-battles` (public). Site: **https://ai-battles-ty3l.onrender.com** (Render static).
+- Repo: `github.com/yannisideris/ai-battles` (public). Site: **https://yannisideris.github.io/ai-battles/** (GitHub Pages από το `main`, ενημερώνεται μόνο του σε κάθε push). Το παλιό https://ai-battles-ty3l.onrender.com (Render static) μένει, αλλά θέλει Manual Deploy.
 - Η αυτόματη ενημέρωση του Render δεν πυροδοτείται (η εφαρμογή Render στο GitHub δεν έχει πρόσβαση στο repo): μετά από push → Render dashboard → Manual Deploy → Deploy latest commit.
 
 - ✅ **Σταθερή έκδοση = `v1.0`** (git tag): η μεμονωμένη μάχη, «παγωμένη» ως αυτοτελές παιχνίδι. Ο κλάδος `main` (και το site) μένει η σταθερή έκδοση· η εκστρατεία αναπτύσσεται στον κλάδο `campaign` και μπαίνει ως **ξεχωριστή επιλογή** στο μενού, χωρίς να αλλάξει η μεμονωμένη μάχη.

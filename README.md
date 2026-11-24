@@ -1,5 +1,7 @@
 # AI Battles
 
+**Play:** https://yannisideris.github.io/ai-battles/
+
 A small real-time 3D battle in the browser: humans against skeletons, 16 against 16, in a randomly generated village.
 You are the captain — fight in the front line and give orders to your army. If you fall, you take over one of your soldiers.
 

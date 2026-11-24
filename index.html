@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AI Battles</title>
-<link rel="stylesheet" href="src/style.css?v=6">   <!-- ?v=: bump when style.css changes, so browsers fetch it at once -->
+<link rel="stylesheet" href="src/style.css?v=7">   <!-- ?v=: bump when style.css changes, so browsers fetch it at once -->
 <script type="importmap">
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
@@ -51,7 +51,10 @@
 </div>
 <div id="paused" class="overlay hidden"><div class="panel"><h1 id="paused-title">Παύση</h1></div></div>
 <div id="camp" class="overlay hidden"><div class="panel cpanel" id="camp-body"></div></div>
-<div id="end" class="overlay hidden"><div class="panel"><h1 id="end-title"></h1><p id="end-sub"></p><button id="again" class="big">Again</button><button id="replay" class="hidden">Replay battle</button></div></div>
+<div id="end" class="overlay hidden"><div class="panel"><h1 id="end-title"></h1><p id="end-sub"></p>
+  <div id="end-main"><button id="replay" class="big hidden">Same battle again</button><button id="again" class="big camp">Main menu</button></div>
+  <div id="end-again" class="hidden"><p id="again-sub"></p><button id="same-army" class="big">Same army</button><button id="change-army" class="big camp">Change army</button><button id="again-back">Back</button></div>
+</div></div>
 
 <script type="module" src="src/main.js"></script>
 </body>

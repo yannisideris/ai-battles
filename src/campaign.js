@@ -193,25 +193,37 @@ export class Campaign {
   // ---------------------------------------------------------------- the skirmish ("Battle!"): a budget, the shop, then the fight
   // The budget: small / large, or random by default (the player is not told which). The enemy gets about the same
   // budget and builds its army blind - it never sees what you bought.
-  skirmishShop() {
+  // again = the last battle (same budget, same enemy, same battlefield): back in the shop with the army you had
+  skirmishShop(again = null) {
     this.mode = "skirmish";
-    const b = this.game.settings.budget || "random", rnd = (a, z) => Math.round((a + Math.random() * (z - a)) / 5) * 5;
-    const coins = b === "low" ? rnd(300, 380) : b === "high" ? rnd(620, 760) : rnd(300, 760);
-    this.state = { side: this.game.settings.side, coins, budget: coins, roster: [], nextId: 1, lead: null, won: 0 };
+    if (again) {
+      this.fixedFoe = again.foe;
+      const roster = again.roster.map((e) => ({ ...e })), spent = roster.reduce((a, e) => a + PRICE[e.type], 0);
+      this.state = { side: this.game.settings.side, coins: again.budget - spent, budget: again.budget, roster, nextId: Math.max(0, ...roster.map((e) => e.id)) + 1, lead: again.lead, won: 0 };
+    } else {
+      this.fixedFoe = null;
+      const rnd = (a, z) => Math.round((a + Math.random() * (z - a)) / 5) * 5, coins = rnd(300, 760);   // (always a random budget)
+      this.state = { side: this.game.settings.side, coins, budget: coins, roster: [], nextId: 1, lead: null, won: 0 };
+    }
     this.lastResult = null; this.campScreen();
   }
   startSkirmish() {
     const g = this.game, s = this.state, side = s.side, foe = side === "human" ? "skeleton" : "human";
-    // a random battlefield (hills as in the campaign; now and then the enemy's castle); the seed is kept so
-    // "Replay battle" gives the very same one
-    const terrain = pickR(Math.random, [...TERRAINS, "castle"]);
-    const hills = terrain === "hills" ? 2 : ["open", "forest", "ruins"].includes(terrain) && Math.random() < 0.35 ? 1 : 0;
-    // behind walls the defenders are much stronger (sims: 8 of 10 with equal armies): they get less money
-    const themes = Object.keys(THEMES), budget = s.budget * (0.9 + Math.random() * 0.2) * (terrain === "castle" ? 0.8 : 1);
-    const enemy = enemyArmy(Math.round(budget), Math.random, 1, themes[Math.floor(Math.random() * themes.length)]);
+    let f = this.fixedFoe;
+    if (!f) {
+      // a random battlefield (hills as in the campaign; now and then the enemy's castle); the seed is kept so
+      // "Same battle again" gives the very same one
+      const terrain = pickR(Math.random, [...TERRAINS, "castle"]);
+      const hills = terrain === "hills" ? 2 : ["open", "forest", "ruins"].includes(terrain) && Math.random() < 0.35 ? 1 : 0;
+      // behind walls the defenders are much stronger (sims: 8 of 10 with equal armies): they get less money
+      const themes = Object.keys(THEMES), budget = s.budget * (0.9 + Math.random() * 0.2) * (terrain === "castle" ? 0.8 : 1);
+      f = { army: enemyArmy(Math.round(budget), Math.random, 1, themes[Math.floor(Math.random() * themes.length)]), terrain, hills, seed: (Math.random() * 1e9) | 0 };
+    }
     const mine = this.field().map((e) => ({ type: e.type, vet: 0, id: e.id, lead: e.id === s.lead }));
-    g.campaignBattle = { armies: { [side]: mine, [foe]: enemy }, terrain, hills, spawn: null, kind: "skirmish", seed: (Math.random() * 1e9) | 0,
-      castleSide: foe === "human" ? 1 : -1 };
+    g.campaignBattle = { armies: { [side]: mine, [foe]: f.army.map((e) => ({ ...e })) }, terrain: f.terrain, hills: f.hills, spawn: null, kind: "skirmish", seed: f.seed,
+      castleSide: foe === "human" ? 1 : -1,
+      // for "Same battle again": the budget, your army as bought, and the enemy side as it was
+      again: { budget: s.budget, lead: s.lead, roster: s.roster.map((e) => ({ ...e })), foe: { army: f.army.map((e) => ({ ...e })), terrain: f.terrain, hills: f.hills, seed: f.seed } } };
     g.settings.role = "captain";
     this.hide(); g.start();
   }
@@ -333,14 +345,20 @@ export class Campaign {
         ${r.fallen.length ? `${t.fallen}: ${r.fallen.map((e) => this.name(e.type)).join(", ")}` : ""}</div>` : "";
     const nField = this.field().length, nCap = s.roster.filter((e) => isCap(e.type)).length;
     const sk = this.mode === "skirmish";
-    const rows = [...s.roster].sort((a, b) => (isCap(b.type) - isCap(a.type)) || a.type.localeCompare(b.type)).map((e) => `
+    // the "Battle!" shop: one line per kind, the newest kind on top, "×2" for more of the same, no reserve
+    const groups = sk ? Object.values(s.roster.reduce((g, e) => { (g[e.type] ??= []).push(e); return g; }, {})).sort((A, B) => Math.max(...B.map((e) => e.id)) - Math.max(...A.map((e) => e.id))) : null;
+    const skRows = sk ? groups.map((G) => { const e = G[G.length - 1], lead = G.some((x) => x.id === s.lead); return `
+      <div class="unit"><img class="ico" data-ico="${e.type}" alt=""><span class="nm">${this.name(e.type)}${G.length > 1 ? ` <b class="cnt">×${G.length}</b>` : ""}${lead ? ` <b class="lead">${t.lead}</b>` : ""}</span>
+        ${isCap(e.type) && !lead ? `<button data-act="lead" data-id="${e.id}">${t.makeLead}</button>` : ""}
+        <button data-act="sell" data-id="${e.id}" title="${t.sell}">✕</button></div>`; }).join("") : "";
+    const rows = sk ? skRows : [...s.roster].sort((a, b) => (isCap(b.type) - isCap(a.type)) || a.type.localeCompare(b.type)).map((e) => `
       <div class="unit ${e.field ? "" : "res"}"><img class="ico" data-ico="${e.type}" alt=""><span class="nm">${this.name(e.type)} <span class="stars">${"★".repeat(e.vet || 0)}</span>${e.id === s.lead ? ` <b class="lead">${t.lead}</b>` : ""}</span>
         <button data-act="field" data-id="${e.id}">${e.field ? t.inField : t.reserve}</button>
         ${isCap(e.type) && e.id !== s.lead ? `<button data-act="lead" data-id="${e.id}">${t.makeLead}</button>` : ""}
         ${!sk && (e.vet || 0) < 3 ? `<button data-act="train" data-id="${e.id}" title="${t.train}" ${trainCost(e) > s.coins ? "disabled" : ""}>★+ <small>${trainCost(e)}</small></button>` : ""}
         ${sk ? `<button data-act="sell" data-id="${e.id}" title="${t.sell}">✕</button>` : ""}</div>`).join("");
     const shop = SHOP.map((type) => {
-      const no = PRICE[type] > s.coins || (isCap(type) && nCap >= MAX_CAPTAINS);
+      const no = PRICE[type] > s.coins || (isCap(type) && nCap >= MAX_CAPTAINS) || (sk && s.roster.length >= MAX_FIELD);
       return `<button data-act="buy" data-type="${type}" ${no ? "disabled" : ""}><img class="ico" data-ico="${type}" alt="">${this.name(type)} <small>${PRICE[type]}</small></button>`;
     }).join("");
     this.show(`${res}<div class="maphead"><span><b>${s.coins}</b> ${t.coins}</span><span>${nField}/${MAX_FIELD} ${t.inField} · ${t.capMax}</span></div>

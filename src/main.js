@@ -54,7 +54,13 @@ class Game {
     this.captainLabels();
     $("start").onclick = () => this.campaign.skirmishShop();
     $("again").onclick = () => { $("end").classList.add("hidden"); $("menu").classList.remove("hidden"); };
-    $("replay").onclick = () => {
+    // "Same battle again": same enemies, same battlefield - then: with the same army, or back to the shop (same
+    // budget, your army as you had it) to change it
+    const endPage = (again) => { $("end-main").classList.toggle("hidden", again); $("end-again").classList.toggle("hidden", !again); this.menuFocusReset?.(); };
+    $("replay").onclick = () => { if (this.lastSkirmish) endPage(true); };
+    $("again-back").onclick = () => endPage(false);
+    $("change-army").onclick = () => { if (!this.lastSkirmish) return; $("end").classList.add("hidden"); this.campaign.skirmishShop(this.lastSkirmish.again); };
+    $("same-army").onclick = () => {
       if (!this.lastSkirmish) return;
       $("end").classList.add("hidden"); this.campaignBattle = JSON.parse(JSON.stringify(this.lastSkirmish)); this.settings.role = "captain"; this.start();
     };
@@ -71,9 +77,14 @@ class Game {
   // button in the next row that covers most of the current one), A / Enter / Space picks the focused one.
   // Passing over an option does not change it; the picked value keeps its own look, the focus is an outline.
   menuPad() {
-    const items = () => [...document.querySelectorAll("#menu .row button"), $("start"), $("campaign")];
-    let focus = items().indexOf($("start")), prev = {};
-    const mark = () => items().forEach((b, i) => b.classList.toggle("padfocus", i === focus));
+    // (the end-of-battle screen too: its visible buttons, top to bottom)
+    const endOpen = () => !$("end").classList.contains("hidden");
+    const items = () => endOpen() ? [...document.querySelectorAll("#end button")].filter((b) => b.offsetParent)
+      : [...document.querySelectorAll("#menu .row button"), $("start"), $("campaign")];
+    const home = () => endOpen() ? 0 : items().indexOf($("start"));
+    let focus = home(), prev = {};
+    const mark = () => { const bs = items(); document.querySelectorAll("#menu button, #end button").forEach((b) => b.classList.toggle("padfocus", bs.indexOf(b) === focus)); };
+    this.menuFocusReset = () => { focus = home(); mark(); };
     const move = (dir) => {
       document.body.classList.add("padnav");
       const bs = items(), cur = bs[focus]?.getBoundingClientRect(); if (!cur) return;
@@ -99,8 +110,7 @@ class Game {
     addEventListener("mousemove", () => document.body.classList.remove("padnav"));
     const confirm = () => {
       document.body.classList.add("padnav");
-      if (!$("end").classList.contains("hidden")) $("again").click();
-      else if (!$("menu").classList.contains("hidden")) { items()[focus]?.click(); mark(); }
+      items()[focus]?.click(); mark();
     };
     const menuOpen = () => !$("menu").classList.contains("hidden") || !$("end").classList.contains("hidden");
     // the press that brought us back here ("Back" in the shop, Enter / A) must not also press a button of this menu:
@@ -109,7 +119,7 @@ class Game {
     addEventListener("keydown", (e) => {
       if (!menuOpen() || !wasOpen) return;
       const k = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" }[e.key];
-      if (k && !$("menu").classList.contains("hidden")) { move(k); e.preventDefault(); }
+      if (k) { move(k); e.preventDefault(); }
       if (e.key === "Enter" || e.key === " ") { confirm(); e.preventDefault(); }
     });
     // the stick as on the shop screens: one direction at a time (the stronger axis), counts once past 0.6 and is free
@@ -118,6 +128,7 @@ class Game {
     const poll = (t) => {
       requestAnimationFrame(poll);
       if (!menuOpen()) { prev = {}; stickDir = null; wasOpen = false; armed = false; return; }
+      if (!wasOpen) { focus = home(); mark(); }   // just opened: the focus on its main button
       wasOpen = true;
       const p = [...(navigator.getGamepads ? navigator.getGamepads() : [])].find(Boolean);
       if (!p) return;
@@ -129,7 +140,7 @@ class Game {
       const dir = dpad || (want && (!stickDir || want === stickDir) ? want : stickDir && mag >= 0.3 ? stickDir : null);
       const ok = btn(0) || btn(9);
       if (!armed) { if (!ok && !dir && mag < 0.3) armed = true; prev = { dir, ok }; return; }
-      if (!$("menu").classList.contains("hidden") && dir) {
+      if (dir) {
         if (dir !== prev.dir) { move(dir); repeatAt = t + 500; }
         else if (t >= repeatAt) { move(dir); repeatAt = t + 220; }
       }
@@ -454,10 +465,16 @@ class Game {
       return;
     }
     $("end-title").textContent = won ? this.ui.victory : this.ui.defeat;
-    $("again").textContent = this.settings.lang === "el" ? "Ξανά" : "Again";
+    const el = this.settings.lang === "el";
+    $("again").textContent = el ? "Αρχικό μενού" : "Main menu";
+    $("same-army").textContent = el ? "Με τον ίδιο στρατό" : "With the same army";
+    $("change-army").textContent = el ? "Αλλαγή στρατού" : "Change my army";
+    $("again-back").textContent = el ? "Πίσω" : "Back";
+    $("again-sub").textContent = el ? "Ίδιοι αντίπαλοι, ίδιο πεδίο μάχης." : "Same enemies, same battlefield.";
+    $("end-main").classList.remove("hidden"); $("end-again").classList.add("hidden");
     // "Battle!": the same battle again (same armies, same battlefield)
     this.lastSkirmish = this.campaignBattle?.kind === "skirmish" ? JSON.parse(JSON.stringify(this.campaignBattle)) : null;
-    $("replay").textContent = this.settings.lang === "el" ? "Ξανά η ίδια μάχη" : "Replay battle";
+    $("replay").textContent = el ? "Ξανά η ίδια μάχη" : "Same battle again";
     $("replay").classList.toggle("hidden", !this.lastSkirmish);
     $("end-sub").textContent = won ? (routed ? this.ui.enemyRouted : this.ui.enemyWiped) : (routed ? this.ui.youRouted : this.ui.youWiped);
     $("end").classList.remove("hidden");

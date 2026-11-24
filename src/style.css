@@ -38,6 +38,8 @@ body:has(#menu:not(.hidden)) #hud, body:has(#camp:not(.hidden)) #hud { visibilit
 .panel button.sel, .panel button.focus { border-color: #f1c40f; background: #145a46; }
 .panel button.big { width: 100%; margin-top: 12px; background: var(--accent2); border-color: var(--accent2); font-size: 18px; font-weight: 700; }
 .hint { font-size: 12px; opacity: .7; text-align: center; }
+#menu .hint { font-size: 13px; opacity: .88; }   /* the controls line under the main menu: a touch bigger / brighter */
+@media (min-width: 900px) and (min-height: 700px) { #menu .panel { zoom: 1.15; } }   /* the main menu a little bigger on large screens */
 @media (max-width: 600px) { .row .cap { width: 100%; } .panel { min-width: 0; margin: 0 16px; } }
 /* floating combat text */
 .pop { position: absolute; transform: translate(-50%, -50%); font-weight: 900; font-size: 22px; pointer-events: none;

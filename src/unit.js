@@ -317,7 +317,7 @@ export class Unit {
       return dmg;
     }
     // a flinch, not a jolt: the hit clip at part weight (big bodies even less), a touch slower
-    if (!this.busy() && !this.charging && !this.heavy) this.play("hit", ...(this.type === "monster" ? [0.05] : [0.08, 0.8, this.s.scale > 1.2 ? 0.35 : 0.55]));   // (golem / colossus: unchanged)
+    if (!this.busy() && !this.charging && !this.heavy) this.play("hit", ...(this.type === "monster" ? [0.05] : [0.08, 0.8, this.s.scale > 1.2 ? 0.2 : 0.3]));   // (golem / colossus: unchanged)
     return dmg;
   }
   die(killer) {

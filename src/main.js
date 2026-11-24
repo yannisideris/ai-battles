@@ -145,6 +145,13 @@ class Game {
     this.sun.shadow.bias = -0.0008;
     this.scene.add(this.sun, this.sun.target);
     this.world = new World(this.scene, this.q, undefined, GALLERY ? "empty" : this.campaignBattle?.terrain ?? DEV_TERRAIN ?? undefined, { hills: this.campaignBattle?.hills ?? DEV_HILLS });
+    // a battlefield's own light (the graveyard at dusk)
+    const mood = this.world.mood;
+    if (mood) {
+      this.scene.background.setHex(mood.sky); this.scene.fog.color.setHex(mood.fog);
+      this.sun.color.setHex(mood.sun); this.sun.intensity = mood.sunI;
+      this.scene.children.find((c) => c.isHemisphereLight)?.intensity !== undefined && (this.scene.children.find((c) => c.isHemisphereLight).intensity = mood.hemi);
+    }
     this.armySpec = this.campaignBattle ? this.campaignBattle.armies : this.skirmishArmies();
     if (GALLERY) { const all = GALLERY_TYPES.map((type) => ({ type })); this.armySpec = { human: all, skeleton: all }; }
     await loadUnitModels(this.q, Object.entries(this.armySpec).flatMap(([team, list]) => list.map((e) => [team, e.type])));

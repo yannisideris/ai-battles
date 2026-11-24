@@ -192,6 +192,7 @@ export class World {
   }
   areaFree(x0, z0, x1, z1) {
     if (this.roadX != null && x1 > this.roadX - 2.0 && x0 < this.roadX + 2.0) return false;   // keep the dirt road clear
+    if ((this.clear || []).some(([a, b, c, d]) => x1 > a && x0 < c && z1 > b && z0 < d)) return false;   // ...and the fields
     const [a, b] = this.toCell(x0, z0), [c, d] = this.toCell(x1, z1);
     for (let i = a - 1; i <= c + 1; i++) for (let j = b - 1; j <= d + 1; j++) if (this.get(i, j) !== FREE) return false;
     return true;
@@ -351,7 +352,6 @@ export class World {
     const rocks = (n) => { for (let i = 0; i < n; i++) { const x = (r() - 0.5) * (MAP_W - 4), z = (r() - 0.5) * (MAP_H - 20); if (this.areaFree(x - 0.4, z - 0.4, x + 0.4, z + 0.4)) this.addRock(x, z); } };
     if (kind === "forest") { trees(22, 7); rocks(6); }
     else if (kind === "hills") { trees(6, 3); rocks(8); }
-    else if (kind === "open") { trees(2, 2); rocks(5); }
     else if (kind === "river") {
       // two bridges: one where the road meets the water (the road crosses on it), one well away from it
       // (16-20 m apart, the second one toward the side with more room, never at the map edge)
@@ -373,30 +373,179 @@ export class World {
       trees(8, 4); rocks(5);
     } else if (kind === "graveyard") {
       const m = this.mat(0x9a9aa2), dark = this.mat(0x6e6a64);
+      // dusk: a violet-grey sky, a low warm sun, duller grass (main.js applies the mood)
+      this.mood = { sky: 0x6f6a86, fog: 0x6f6a86, sun: 0xffb27a, sunI: 1.5, hemi: 1.05 };
+      this.ground.material.color.setRGB(0.78, 0.8, 0.86);   // tints the vertex colours: darker, cooler grass
       // graves in neat rows, with more room between them
       for (let gx = -3; gx <= 3; gx++) for (let gz = -2; gz <= 2; gz++) {
         if (r() < 0.45) continue;
         const x = gx * 3.6 + (r() - 0.5) * 0.6, z = gz * 4.4 + (r() - 0.5) * 0.6;
         if (!this.areaFree(x - 0.3, z - 0.2, x + 0.3, z + 0.2)) continue;
-        const stone = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.7 + r() * 0.3, 0.16), r() < 0.5 ? m : dark);
+        const stone = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.7 + r() * 0.3, 0.16), m);   // all the same grey stone
         stone.position.set(x, 0.38, z); stone.rotation.y = (r() - 0.5) * 0.3; stone.castShadow = this.q.shadows; this.group.add(stone);
+        if (r() < 0.3) {   // now and then a little tuft of grass at the foot of the stone, bottom left
+          // drawn as a few thin strokes fanning out (lines, not a lump)
+          const pts = [];
+          for (let k = 0; k < 5; k++) {
+            const lean = (k - 2) * 0.07 + (r() - 0.5) * 0.03, hb = 0.2 + r() * 0.12, bx = (k - 2) * 0.02;
+            pts.push(new THREE.Vector3(bx, 0.01, 0), new THREE.Vector3(bx + lean, hb, (r() - 0.5) * 0.03));
+          }
+          const tuft = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0x9cc45a }));
+          tuft.position.set(x - 0.26, 0, z + 0.11); this.group.add(tuft);
+        }
         this.markRect(x - 0.25, z - 0.05, x + 0.25, z + 0.05, FENCE);   // knee-high: stops bodies, not arrows
         this.shapes.push({ x, z, hw: 0.3, hd: 0.1 });
       }
-      trees(4, 2); rocks(4);
+      // a small mausoleum (blocks arrows too)
+      for (let tries = 0; tries < 20; tries++) {
+        const mx = (r() < 0.5 ? -1 : 1) * (16.5 + r() * 3), mz = (r() - 0.5) * 14;   // just outside the graveyard wall
+        if (!this.areaFree(mx - 1.6, mz - 1.4, mx + 1.6, mz + 1.4)) continue;
+        // a little stone shrine: light marble, steps, two columns and a pediment in front, the dark door facing the camera
+        const g = new THREE.Group(), marble = this.mat(0xd9d3c7), trim = this.mat(0xbdb5a6), dark = this.mat(0x2e2a33);
+        const box = (w, h, d, m, x, y, z) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); b.position.set(x, y, z); g.add(b); return b; };
+        box(2.9, 0.15, 2.7, trim, 0, 0.075, 0);                 // steps
+        box(2.6, 0.15, 2.4, marble, 0, 0.225, 0.05);
+        box(2.0, 1.5, 1.6, marble, 0, 1.05, -0.25);             // the burial chamber
+        box(0.6, 1.0, 0.05, dark, 0, 0.8, 0.57);                // its door
+        for (const cx of [-0.78, 0.78]) {                       // the columns of the porch
+          const c = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 1.5, 10), marble); c.position.set(cx, 1.05, 0.95); g.add(c);
+          box(0.34, 0.08, 0.34, trim, cx, 0.34, 0.95); box(0.34, 0.08, 0.34, trim, cx, 1.76, 0.95);   // base and capital
+        }
+        box(2.3, 0.18, 2.5, trim, 0, 1.89, 0.1);                // the beam over the columns
+        const ped = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 2.5, 3).rotateX(-Math.PI / 2), marble);   // triangular roof / pediment
+        ped.scale.set(1.33, 0.5, 1); ped.position.set(0, 2.24, 0.1); g.add(ped);
+        g.traverse((o) => { o.castShadow = this.q.shadows; o.receiveShadow = true; });
+        g.position.set(mx, 0, mz); this.group.add(g);
+        this.markRect(mx - 1.4, mz - 1.3, mx + 1.4, mz + 1.3, BLOCK); this.shapes.push({ x: mx, z: mz, hw: 1.48, hd: 1.38 });
+        break;
+      }
+      // dead trees
+      for (let i = 0, tries = 0; i < 7 && tries < 60; tries++) {
+        const x = (r() - 0.5) * (MAP_W - 8), z = zMin + r() * (zMax - zMin);
+        if (this.areaFree(x - 0.4, z - 0.4, x + 0.4, z + 0.4)) { this.addDeadTree(x, z); i++; }
+      }
+      rocks(4);
     } else if (kind === "ruins") {
       for (let i = 0, tries = 0; i < 12 && tries < 300; tries++) {
         const horiz = r() < 0.5, len = 2 + Math.floor(r() * 4), x = (r() - 0.5) * (MAP_W - 10), z = zMin + 2 + r() * (zMax - zMin - 4);
         const w = horiz ? len : 0.6, d = horiz ? 0.6 : len;
         if (!this.areaFree(x - w / 2 - 1, z - d / 2 - 1, x + w / 2 + 1, z + d / 2 + 1)) continue;
-        const h = 0.9 + r() * 1.0;
-        const wall = new THREE.Mesh(new THREE.BoxGeometry(w, h + 0.6, d), this.mat(0xb3aa98)); wall.position.set(x, (h + 0.6) / 2 - 0.6 + this.height(x, z), z);
-        wall.castShadow = this.q.shadows; wall.receiveShadow = true; this.group.add(wall);
+        const h = 0.9 + r() * 1.0, gy = this.height(x, z), seg = 0.5, n = Math.max(2, Math.round(len / seg));
+        const stones = [this.mat(0xb3aa98), this.mat(0xa39a88), this.mat(0xbdb5a3)];
+        for (let k = 0; k < n; k++) {   // the wall in pieces, each its own height: a broken, jagged top
+          const hk = h * (0.45 + r() * 0.55) * (k === 0 || k === n - 1 ? 0.7 : 1), off = -len / 2 + (k + 0.5) * (len / n);
+          const piece = new THREE.Mesh(new THREE.BoxGeometry(horiz ? len / n + 0.02 : 0.6, hk + 0.6, horiz ? 0.6 : len / n + 0.02), stones[Math.floor(r() * 3)]);
+          piece.position.set(x + (horiz ? off : 0), (hk + 0.6) / 2 - 0.6 + gy, z + (horiz ? 0 : off));
+          piece.castShadow = this.q.shadows; piece.receiveShadow = true; this.group.add(piece);
+        }
+        for (let k = 0; k < 3 + Math.floor(r() * 3); k++) {   // fallen stones at its foot
+          const side = r() < 0.5 ? -1 : 1, along = (r() - 0.5) * len, rx = x + (horiz ? along : side * (0.7 + r() * 0.5)), rz = z + (horiz ? side * (0.7 + r() * 0.5) : along);
+          const st = new THREE.Mesh(new THREE.DodecahedronGeometry(0.14 + r() * 0.12, 0), stones[Math.floor(r() * 3)]);
+          st.position.set(rx, this.height(rx, rz) + 0.06, rz); st.rotation.set(r() * 3, r() * 3, r() * 3); st.castShadow = this.q.shadows; this.group.add(st);
+        }
         this.markRect(x - w / 2 + 0.05, z - d / 2 + 0.05, x + w / 2 - 0.05, z + d / 2 - 0.05, BLOCK);
         this.shapes.push({ x, z, hw: w / 2 + 0.03, hd: d / 2 + 0.03 }); i++;
       }
+      // columns: a few still standing, some fallen
+      const colM = this.mat(0xc4bcaa);
+      for (let i = 0, tries = 0; i < 7 && tries < 80; tries++) {
+        const x = (r() - 0.5) * (MAP_W - 12), z = zMin + 3 + r() * (zMax - zMin - 6), standing = r() < 0.55;
+        if (!this.areaFree(x - 1.4, z - 1.4, x + 1.4, z + 1.4)) continue;
+        const hgt = standing ? 1.6 + r() * 1.2 : 2.2;
+        const c = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.32, hgt, 8), colM);
+        if (standing) {
+          c.position.set(x, hgt / 2 + this.height(x, z), z);
+          this.markRect(x - 0.3, z - 0.3, x + 0.3, z + 0.3, BLOCK); this.shapes.push({ c: true, x, z, r: 0.33 });
+        } else {
+          const a = r() * Math.PI; c.rotation.set(Math.PI / 2, 0, a); c.position.set(x, 0.3 + this.height(x, z), z);
+          const hx = Math.abs(Math.sin(a)) * 1.1 + 0.3, hz = Math.abs(Math.cos(a)) * 1.1 + 0.3;
+          this.markRect(x - hx, z - hz, x + hx, z + hz, FENCE); this.shapes.push({ x, z, hw: hx, hd: hz });   // low: stops bodies, not arrows
+        }
+        c.castShadow = this.q.shadows; c.receiveShadow = true; this.group.add(c); i++;
+      }
+      // patches of old stone floor (flat, only looks)
+      const floorM = this.mat(0xa8a090);
+      for (let i = 0; i < 6; i++) {
+        const x = (r() - 0.5) * (MAP_W - 10), z = zMin + r() * (zMax - zMin), w = 2 + r() * 3, d = 2 + r() * 3;
+        if (this.roadX != null && Math.abs(x - this.roadX) < w / 2 + 1.8) continue;
+        (this.clear ??= []).push([x - w / 2 - 0.4, z - d / 2 - 0.4, x + w / 2, z + d / 2]);   // no rocks / trees dropped on it later
+        for (let ix = 0; ix < Math.round(w / 0.8); ix++) for (let iz = 0; iz < Math.round(d / 0.8); iz++) {
+          if (r() < 0.25) continue;   // missing slabs
+          const t = new THREE.Mesh(new THREE.BoxGeometry(0.74, 0.04, 0.74), floorM);
+          const tx = x - w / 2 + ix * 0.8, tz = z - d / 2 + iz * 0.8; t.position.set(tx, this.height(tx, tz) + 0.02, tz); t.receiveShadow = true; this.group.add(t);
+        }
+      }
       trees(5, 3); rocks(10);
+    } else if (kind === "open") {
+      // fields of wheat in strips, haystacks and wild flowers - still open ground
+      const wheat = [this.mat(0xd8c070), this.mat(0xcdb35e)];
+      for (let placed = 0, tries = 0; placed < 5 && tries < 40; tries++) {
+        const x = (r() - 0.5) * (MAP_W - 10), z = zMin + 1 + r() * (zMax - zMin - 2), w = 5 + r() * 5, d = 3 + r() * 3;
+        if (!this.areaFree(x - w / 2 - 0.6, z - d / 2 - 0.6, x + w / 2 + 0.6, z + d / 2 + 0.6)) continue;   // not on the road, nor on another field
+        placed++; (this.clear ??= []).push([x - w / 2 - 1.0, z - d / 2 - 1.0, x + w / 2 + 1.0, z + d / 2 + 1.0]);   // (room round it: no tree crowns over the wheat)
+        // neat rows of wheat straight on the grass, with the ears drawn as golden strokes on top
+        const rows = Math.max(3, Math.round(d / 0.42)), strokes = [];
+        for (let k = 0; k < rows; k++) {
+          const rz = z - d / 2 + (k + 0.5) * (d / rows), l0 = -w / 2 + r() * 0.08, l1 = w / 2 - r() * 0.08, rw = l1 - l0;   // neat, aligned rows
+          const row = new THREE.Mesh(new THREE.BoxGeometry(rw, 0.22 + r() * 0.04, (d / rows) * 0.62), wheat[k % 2]);
+          row.position.set(x + (l0 + l1) / 2, 0.13, rz); row.receiveShadow = true; this.group.add(row);
+          for (let t = l0 + 0.05; t < l1; t += 0.11) {   // ears sticking up out of the row
+            const sx = x + t + (r() - 0.5) * 0.05, sz = rz + (r() - 0.5) * (d / rows) * 0.5, h = 0.34 + r() * 0.1;
+            strokes.push(new THREE.Vector3(sx, 0.22, sz), new THREE.Vector3(sx + (r() - 0.5) * 0.06, h, sz + (r() - 0.5) * 0.04));
+          }
+        }
+        this.group.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(strokes), new THREE.LineBasicMaterial({ color: 0xeed98a })));
+      }
+      for (let i = 0, tries = 0; i < 6 && tries < 60; tries++) {   // haystacks
+        const x = (r() - 0.5) * (MAP_W - 8), z = zMin + r() * (zMax - zMin);
+        if (!this.areaFree(x - 0.6, z - 0.6, x + 0.6, z + 0.6)) continue;
+        // a stook: 4-5 sheaves of wheat standing up, leaning in on each other; each sheaf is tied in the middle
+        const g = new THREE.Group(), straw = [this.mat(0xe0c46a), this.mat(0xd2b35a)], tie = this.mat(0x9c7a35), ears = this.mat(0xe9d27e);
+        const n = 4 + Math.floor(r() * 2);
+        for (let k = 0; k < n; k++) {
+          const sh = new THREE.Group(), m = straw[k % 2];
+          const low = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.14, 0.5, 7), m); low.position.y = 0.25;      // stalks, spread at the foot
+          const band = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.06, 7), tie); band.position.y = 0.52;   // the tie
+          const up = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.07, 0.4, 7), ears); up.position.y = 0.75;    // the ears, fanned out
+          sh.add(low, band, up);
+          const a = (k / n) * Math.PI * 2 + r() * 0.4;
+          sh.position.set(Math.cos(a) * 0.34, 0, Math.sin(a) * 0.34);
+          sh.rotation.set(-Math.sin(a) * 0.36, 0, Math.cos(a) * 0.36);   // feet apart, tops leaning in together
+          g.add(sh);
+        }
+        g.position.set(x, 0, z); g.traverse((o) => { if (o.isMesh) { o.castShadow = this.q.shadows; o.receiveShadow = false; } }); this.group.add(g);   // (no shadow blots where the sheaves touch)
+        this.markRect(x - 0.35, z - 0.35, x + 0.35, z + 0.35, BLOCK); this.shapes.push({ c: true, x, z, r: 0.42 }); i++;
+      }
+      // wild flowers in little clumps: a thin green stem (a stroke) and a small flat bloom on top (cheap: one
+      // instanced mesh for the blooms, one line mesh for all the stems)
+      const N = 360, bloom = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.06, 0), new THREE.MeshToonMaterial({ gradientMap: this.grad }), N);
+      const mtx = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(1, 0.45, 1), fc = new THREE.Color(), stems = [];
+      const palette = [0xf2f2f2, 0xf4d35e, 0xe76f8a, 0xa79bf2, 0xffa94d];
+      let n = 0;
+      for (let c = 0; c < 90 && n < N; c++) {
+        const cx = (r() - 0.5) * (MAP_W - 4), cz = (r() - 0.5) * (MAP_H - 6), col = palette[Math.floor(r() * palette.length)];
+        if (!this.areaFree(cx - 0.4, cz - 0.4, cx + 0.4, cz + 0.4)) continue;   // not on the road, in a field or in a thicket
+        for (let k = 0, m = 3 + Math.floor(r() * 4); k < m && n < N; k++, n++) {
+          const fx = cx + (r() - 0.5) * 0.6, fz = cz + (r() - 0.5) * 0.6, h = 0.13 + r() * 0.08, lx = (r() - 0.5) * 0.05;
+          stems.push(new THREE.Vector3(fx, 0.01, fz), new THREE.Vector3(fx + lx, h, fz));
+          bloom.setMatrixAt(n, mtx.compose(new THREE.Vector3(fx + lx, h + 0.02, fz), q, sc)); bloom.setColorAt(n, fc.setHex(col));
+        }
+      }
+      bloom.count = n; this.group.add(bloom);
+      this.group.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(stems), new THREE.LineBasicMaterial({ color: 0x4f8a35 })));
+      trees(2, 2); rocks(5);
     }
+  }
+  addDeadTree(x, z) {
+    const g = new THREE.Group(), bark = this.mat(0x3d3438), s = 0.9 + this.rand() * 0.5;
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.08 * s, 0.16 * s, 1.6 * s, 5), bark); trunk.position.y = 0.8 * s; g.add(trunk);
+    for (let i = 0; i < 4; i++) {   // bare branches reaching up and out
+      const br = new THREE.Mesh(new THREE.CylinderGeometry(0.025 * s, 0.05 * s, 0.7 * s, 4), bark);
+      const a = this.rand() * Math.PI * 2, h = (0.9 + this.rand() * 0.6) * s;
+      br.position.set(Math.cos(a) * 0.18 * s, h, Math.sin(a) * 0.18 * s); br.rotation.set(Math.sin(a) * 0.8, 0, -Math.cos(a) * 0.8); g.add(br);
+    }
+    g.traverse((o) => { o.castShadow = this.q.shadows; }); g.position.set(x, this.height(x, z), z); this.group.add(g);
+    this.markRect(x - 0.15, z - 0.15, x + 0.15, z + 0.15, BLOCK); this.shapes.push({ c: true, x, z, r: 0.14 * s });
   }
   addHouse(x, z, w, d, rot) {
     if (rot) [w, d] = [d, w];

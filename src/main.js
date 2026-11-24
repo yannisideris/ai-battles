@@ -18,6 +18,7 @@ const SPECTATE = !!params.get("spectate");
 const SIM = Number(params.get("sim")) || 0;
 // ?campsim=10 -> play 10 whole campaigns headless with a simple player (dev: economy / difficulty check)
 const CAMPSIM = Number(params.get("campsim")) || 0;
+const THEMESIM = Number(params.get("themesim")) || 0;   // dev: each enemy theme vs a typical army of the same worth
 // ?gallery=attack -> dev only: every unit model of both sides in two rows on an empty field, looping that clip
 // (&team=human|skeleton for one row up close)
 const GALLERY = params.get("gallery");
@@ -53,6 +54,10 @@ class Game {
     this.captainLabels();
     $("start").onclick = () => this.campaign.skirmishShop();
     $("again").onclick = () => { $("end").classList.add("hidden"); $("menu").classList.remove("hidden"); };
+    $("replay").onclick = () => {
+      if (!this.lastSkirmish) return;
+      $("end").classList.add("hidden"); this.campaignBattle = JSON.parse(JSON.stringify(this.lastSkirmish)); this.settings.role = "captain"; this.start();
+    };
     if (params.get("auto")) setTimeout(() => this.start(), 50);
     this.menuPad();
   }
@@ -144,7 +149,7 @@ class Game {
     Object.assign(this.sun.shadow.camera, { left: -16, right: 16, top: 16, bottom: -16, near: 1, far: 60 });
     this.sun.shadow.bias = -0.0008;
     this.scene.add(this.sun, this.sun.target);
-    this.world = new World(this.scene, this.q, undefined, GALLERY ? "empty" : this.campaignBattle?.terrain ?? DEV_TERRAIN ?? undefined, { hills: this.campaignBattle?.hills ?? DEV_HILLS });
+    this.world = new World(this.scene, this.q, this.campaignBattle?.seed, GALLERY ? "empty" : this.campaignBattle?.terrain ?? DEV_TERRAIN ?? undefined, { hills: this.campaignBattle?.hills ?? DEV_HILLS });
     // a battlefield's own light (the graveyard at dusk)
     const mood = this.world.mood;
     if (mood) {
@@ -172,6 +177,7 @@ class Game {
     this.startedAt = performance.now();
     if (SIM) { this.runSims(SIM); return; }
     if (CAMPSIM) { this.muted = true; this.running = false; this.player.setPlayer(false); this.campaign.simulate(CAMPSIM); return; }
+    if (THEMESIM) { this.muted = true; this.running = false; this.player.setPlayer(false); this.campaign.themeSim(THEMESIM); return; }
     if (GALLERY) { this.gallery(GALLERY); return; }
     this.speak("foe", "start", { priority: true });
     this.pending.push({ at: 3.2, fn: () => this.speak("ally", "start", { priority: true }) });
@@ -430,6 +436,10 @@ class Game {
     }
     $("end-title").textContent = won ? this.ui.victory : this.ui.defeat;
     $("again").textContent = this.settings.lang === "el" ? "Ξανά" : "Again";
+    // "Battle!": the same battle again (same armies, same battlefield)
+    this.lastSkirmish = this.campaignBattle?.kind === "skirmish" ? JSON.parse(JSON.stringify(this.campaignBattle)) : null;
+    $("replay").textContent = this.settings.lang === "el" ? "Ξανά η ίδια μάχη" : "Replay battle";
+    $("replay").classList.toggle("hidden", !this.lastSkirmish);
     $("end-sub").textContent = won ? (routed ? this.ui.enemyRouted : this.ui.enemyWiped) : (routed ? this.ui.youRouted : this.ui.youWiped);
     $("end").classList.remove("hidden");
   }

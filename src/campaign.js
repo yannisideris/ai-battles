@@ -16,7 +16,7 @@ const TERRAINS = ["village", "forest", "open", "river", "graveyard", "ruins", "h
 // enemy armies have a CORE (a mass of one or two kinds, the look we like) and a few specials around it
 const THEMES = {
   shieldwall: { core: ["soldier", "soldier", "shieldbearer"], extra: ["archer", "spearman", "support"] },
-  arrows: { core: ["archer"], extra: ["soldier", "shieldbearer", "mage"] },
+  arrows: { core: ["archer", "archer", "shieldbearer"], extra: ["soldier", "soldier", "mage"] },   // (all archers and no front: won 0% in sims)
   spears: { core: ["spearman"], extra: ["archer", "soldier", "brute"] },
   magic: { core: ["mage", "archer", "archer"], extra: ["soldier", "shieldbearer", "support"] },
   horde: { core: ["brute", "scout", "soldier"], extra: ["monster", "archer"] },
@@ -157,7 +157,12 @@ function makeMap(seed) {
     n.terrain = last ? "ruins" : pickR(r, TERRAINS);
     // high ground only on some battlefields: always on "hills", now and then on open / forest / ruins
     n.hills = n.terrain === "hills" ? 2 : ["open", "forest", "ruins"].includes(n.terrain) && r() < 0.35 ? 1 : 0;
-    n.theme = last ? "legion" : pickR(r, Object.keys(THEMES));
+    // simpler armies early, the special ones later; the legion (the strongest mix) only near the castle and at it
+    // (from ?themesim: shieldwall and spears hold best at mid budgets, the legion everywhere; arrows / mixed / horde
+    // / magic are the softer ones)
+    n.theme = last ? "legion" : pickR(r, n.col <= 2 ? ["arrows", "mixed", "horde", "spears"]
+      : n.col <= 4 ? ["arrows", "mixed", "horde", "magic", "spears", "shieldwall"]
+      : ["shieldwall", "spears", "magic", "horde", "mixed", "legion"]);
     n.budget = Math.round(budget);
     n.army = enemyArmy(n.budget, r, last ? 3 : budget > base * 1.2 && r() < 0.4 ? 2 : 1, n.theme);   // a strong roll may bring a second captain
     n.reward = Math.round((n.budget * 0.27 * (last ? 2 : 1)) / 5) * 5;
@@ -199,7 +204,10 @@ export class Campaign {
     const g = this.game, s = this.state, side = s.side, foe = side === "human" ? "skeleton" : "human";
     const themes = Object.keys(THEMES), enemy = enemyArmy(Math.round(s.budget * (0.9 + Math.random() * 0.2)), Math.random, 1, themes[Math.floor(Math.random() * themes.length)]);
     const mine = this.field().map((e) => ({ type: e.type, vet: 0, id: e.id, lead: e.id === s.lead }));
-    g.campaignBattle = { armies: { [side]: mine, [foe]: enemy }, terrain: "village", hills: 0, spawn: null, kind: "skirmish" };
+    // a random battlefield (hills as in the campaign); the seed is kept so "Replay battle" gives the very same one
+    const terrain = pickR(Math.random, TERRAINS);
+    const hills = terrain === "hills" ? 2 : ["open", "forest", "ruins"].includes(terrain) && Math.random() < 0.35 ? 1 : 0;
+    g.campaignBattle = { armies: { [side]: mine, [foe]: enemy }, terrain, hills, spawn: null, kind: "skirmish", seed: (Math.random() * 1e9) | 0 };
     g.settings.role = "captain";
     this.hide(); g.start();
   }
@@ -507,6 +515,33 @@ export class Campaign {
       document.getElementById("general-line").textContent = `CAMPSIM ${k + 1}/${runs}: castle ${out.filter((o) => o.castle).length}`;
     }
     window.__campSim = out; console.log("[CAMPSIM]", JSON.stringify(out));
+    return out;
+  }
+  // dev (?themesim=N): every enemy theme, N battles each at a few budgets, against a typical player army of the same
+  // worth (captain, soldiers + archers, a couple of specials, the rest as veterans). Prints the player's win rate.
+  async themeSim(runs, budgets = [300, 550, 900]) {
+    const side = this.game.settings.side, foe = side === "human" ? "skeleton" : "human", out = {};
+    const only = new URLSearchParams(location.search).get("theme");   // &theme=arrows: just that one
+    const player = (budget) => {
+      const a = [{ type: "captain", vet: 0 }]; let left = budget - PRICE.captain;
+      const plan = ["soldier", "archer", "soldier", "archer", "soldier", "spearman", "archer", "soldier", "shieldbearer", "archer", "soldier", "mage", "soldier", "archer", "support"];
+      for (const t of plan) { if (a.length >= MAX_FIELD || PRICE[t] > left) continue; a.push({ type: t, vet: 0 }); left -= PRICE[t]; }
+      for (let g = 0; g < 80 && left > 8; g++) { const e = a[g % a.length]; const c = PRICE[e.type] * 0.35; if ((e.vet || 0) >= 3 || c > left) continue; e.vet = (e.vet || 0) + 1; left -= c; }
+      return a;
+    };
+    const themes = only ? [only] : Object.keys(THEMES);
+    let k = 0, total = themes.length * budgets.length * runs;
+    for (const theme of themes) for (const b of budgets) {
+      let wins = 0;
+      for (let i = 0; i < runs; i++) {
+        const armies = { [side]: player(b), [foe]: enemyArmy(b, Math.random, 1, theme) };
+        const r = await this.game.runCampaignBattle({ armies, terrain: pickR(Math.random, TERRAINS), hills: 0, spawn: null, kind: "normal", defendT: 0 });
+        if (r.won) wins++;
+        document.getElementById("general-line").textContent = `THEMESIM ${++k}/${total}`;
+      }
+      (out[theme] ??= {})[b] = Math.round((100 * wins) / runs);
+    }
+    window.__themeSim = out; console.log("[THEMESIM] player win %", JSON.stringify(out));
     return out;
   }
   defeat() {

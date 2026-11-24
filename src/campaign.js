@@ -181,9 +181,25 @@ export class Campaign {
   name(type, team = this.state?.side || this.game.settings.side) { return this.t.names[team][type] || type; }
 
   // ---------------------------------------------------------------- screens
-  show(html) {
+  // screen: a name for the screen; when the same screen is drawn again (a unit bought in the shop), the pad / keys
+  // focus stays on the same button (or, if it is gone / disabled now, the one nearest to where it was)
+  show(html, screen = null) {
+    const same = screen && screen === this.screen && !this.el.classList.contains("hidden");
+    const old = same ? this.buttons()[this.focus] : null;
+    const key = (b) => `${b.dataset.act}:${b.dataset.type ?? b.dataset.id ?? b.textContent}`;
+    const oldKey = old && key(old), oldR = old?.getBoundingClientRect();
     document.getElementById("menu").classList.add("hidden"); document.getElementById("end").classList.add("hidden");
-    this.el.classList.remove("hidden"); this.body.innerHTML = html; this.focus = 0; this.body.classList.remove("shoppanel");
+    this.el.classList.remove("hidden"); this.body.innerHTML = html; this.focus = 0; this.body.classList.toggle("shoppanel", screen === "camp");   // the shop / army screen: narrower
+    this.screen = screen;
+    if (old) {
+      const bs = this.buttons(); let i = bs.findIndex((b) => key(b) === oldKey);
+      if (i < 0) {   // gone: the nearest button to where it was
+        const cx = oldR.left + oldR.width / 2, cy = oldR.top + oldR.height / 2;
+        const d = (b) => { const r = b.getBoundingClientRect(); return Math.hypot(r.left + r.width / 2 - cx, r.top + r.height / 2 - cy); };
+        i = bs.reduce((best, b, j) => (best < 0 || d(b) < d(bs[best]) ? j : best), -1);
+      }
+      this.focus = Math.max(0, i);
+    }
     this.armed = false; this.shownAt = performance.now();   // the press that opened this screen must not also click in it
     this.markFocus();
   }
@@ -365,8 +381,7 @@ export class Campaign {
       <h3>${t.shop}</h3><div class="shopwrap"><div class="shop">${shop}</div>
         <div class="prev"><canvas id="unitprev"></canvas><div id="prevtxt"></div></div></div>
       <h3>${sk ? t.yourArmy : t.roster}</h3><div class="roster">${rows}</div>
-      <div class="bar"><button class="big" data-act="cont">${sk ? t.fight : t.cont}</button>${sk ? `<button data-act="menu">${t.back2}</button>` : ""}</div>`);
-    this.body.classList.add("shoppanel");   // the shop / army screen: narrower (the model on top reads best so)
+      <div class="bar"><button class="big" data-act="cont">${sk ? t.fight : t.cont}</button>${sk ? `<button data-act="menu">${t.back2}</button>` : ""}</div>`, "camp");   // (the shop / army screen: a narrower panel, see show)
     this.bind({
       buy: (b) => {
         const type = b.dataset.type; if (PRICE[type] > s.coins) return;

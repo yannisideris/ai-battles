@@ -56,7 +56,11 @@ class Game {
     $("again").onclick = () => { $("end").classList.add("hidden"); $("menu").classList.remove("hidden"); };
     // "Same battle again": same enemies, same battlefield - then: with the same army, or back to the shop (same
     // budget, your army as you had it) to change it
-    const endPage = (again) => { $("end-main").classList.toggle("hidden", again); $("end-again").classList.toggle("hidden", !again); this.menuFocusReset?.(); };
+    // (the second step shows just its three buttons: the result was on the first one)
+    const endPage = (again) => {
+      for (const id of ["end-title", "end-sub", "end-main"]) $(id).classList.toggle("hidden", again);
+      $("end-again").classList.toggle("hidden", !again); this.menuFocusReset?.();
+    };
     $("replay").onclick = () => { if (this.lastSkirmish) endPage(true); };
     $("again-back").onclick = () => endPage(false);
     $("change-army").onclick = () => { if (!this.lastSkirmish) return; $("end").classList.add("hidden"); this.campaign.skirmishShop(this.lastSkirmish.again); };
@@ -470,7 +474,7 @@ class Game {
     $("same-army").textContent = el ? "Με τον ίδιο στρατό" : "With the same army";
     $("change-army").textContent = el ? "Αλλαγή στρατού" : "Change my army";
     $("again-back").textContent = el ? "Πίσω" : "Back";
-    $("end-main").classList.remove("hidden"); $("end-again").classList.add("hidden");
+    for (const id of ["end-title", "end-sub", "end-main"]) $(id).classList.remove("hidden"); $("end-again").classList.add("hidden");
     // "Battle!": the same battle again (same armies, same battlefield)
     this.lastSkirmish = this.campaignBattle?.kind === "skirmish" ? JSON.parse(JSON.stringify(this.campaignBattle)) : null;
     $("replay").textContent = el ? "Ξανά η ίδια μάχη" : "Same battle again";

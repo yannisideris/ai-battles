@@ -633,6 +633,8 @@ class Game {
         if (inp.menuRight) this.orderMenu.sel = (this.orderMenu.sel + 1) % n;
         if (inp.menuConfirm || inp.menuA) { const i = this.orderMenu.sel; this.orderMenu = null; mark(); this.issueOrder(i); }
         else if (inp.menuCancel || inp.menuOpen) { this.orderMenu = null; mark(); }
+        // the stick pushed up / down (or the arrow keys up / down): you want to walk - the menu just closes
+        else if (inp.menuAway || this.input.keys.has("ArrowUp") || this.input.keys.has("ArrowDown")) { this.orderMenu = null; mark(); }
         else mark();
         this.holdT = 0; this.attackBuffer = 0;
         return v;   // standing still while choosing (the arrows / stick are busy picking)

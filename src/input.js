@@ -34,7 +34,7 @@ export class Input {
     // captain's order menu: Enter / RB opens it, left-right picks, Enter / A confirms, Esc / B closes
     let menuOpen = this.pressed.has("Enter") || this.pressed.has("NumpadEnter"), menuConfirm = menuOpen;
     let menuLeft = this.pressed.has("ArrowLeft"), menuRight = this.pressed.has("ArrowRight");
-    let menuCancel = this.pressed.has("Escape"), menuA = false;
+    let menuCancel = this.pressed.has("Escape"), menuA = false, menuAway = false;
     let aim = null, pause = this.pressed.has("Escape"), startBtn = false;
 
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -53,15 +53,20 @@ export class Input {
       if (edge(5)) menuOpen = true;                        // RB opens the captain's order menu
       if (edge(1)) menuCancel = true;                      // B closes it
       if (edge(14)) menuLeft = true; if (edge(15)) menuRight = true;   // D-pad left / right
-      // left stick flicked sideways (for the order menu)
-      const sx = lx > 0.6 ? 1 : lx < -0.6 ? -1 : 0, psx = this.stickX?.[p.index] ?? 0;
-      if (sx !== psx) { if (sx === -1) menuLeft = true; if (sx === 1) menuRight = true; }
-      (this.stickX ??= [])[p.index] = sx;
+      // left stick sideways for the order menu, calm like the shop screens: only when it points mostly sideways, counts
+      // once past 0.6 and is free again below 0.3 (no double steps); held, it repeats after 0.5 s, then every 0.22 s
+      const now = performance.now(), ax0 = p.axes[0] || 0, ay0 = p.axes[1] || 0;
+      const st = (this.stickX ??= [])[p.index] ??= { dir: 0, next: 0 };
+      if (st.dir && Math.abs(ax0) < 0.3) st.dir = 0;
+      const want = Math.abs(ax0) > 0.6 && Math.abs(ax0) > Math.abs(ay0) ? Math.sign(ax0) : 0;
+      if (want && want !== st.dir) { st.dir = want; st.next = now + 500; if (want < 0) menuLeft = true; else menuRight = true; }
+      else if (st.dir && Math.abs(ax0) >= 0.3 && now >= st.next) { st.next = now + 220; if (st.dir < 0) menuLeft = true; else menuRight = true; }
+      menuAway = menuAway || (Math.abs(ay0) > 0.6 && Math.abs(ay0) > Math.abs(ax0));   // pushed up / down: wants to walk
       this.padPrev[p.index] = p.buttons.map((b) => b.pressed);
     }
     const len = Math.hypot(mx, mz); if (len > 1) { mx /= len; mz /= len; }
     const click = this.mouseClick; this.mouseClick = null;
-    const snap = { mx, mz, attack, attackHeld, cycleTarget, aim, order, click, pause, startBtn, menuOpen, menuConfirm, menuLeft, menuRight, menuCancel, menuA };
+    const snap = { mx, mz, attack, attackHeld, cycleTarget, aim, order, click, pause, startBtn, menuOpen, menuConfirm, menuLeft, menuRight, menuCancel, menuA, menuAway };
     this.pressed.clear();
     return snap;
   }

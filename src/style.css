@@ -25,6 +25,7 @@ body:has(#menu:not(.hidden)) #hud, body:has(#camp:not(.hidden)) #hud { visibilit
   padding: 8px 12px; font-size: 13px; cursor: pointer; }
 #orders button.focus { border-color: #f1c40f; }
 #orders button.active { background: var(--accent); }
+#orders::before { content: "RB / Enter"; align-self: center; font-size: 11px; opacity: .6; margin-right: 4px; white-space: nowrap; }   /* which button opens it */
 #bubbles { position: fixed; inset: 0; pointer-events: none; }
 .bubble { position: absolute; transform: translate(-50%, -100%); background: #fff; color: #111; padding: 6px 10px;
   border-radius: 10px; border: 2px solid #111; font-size: 13px; font-weight: 700; max-width: 260px; text-align: center; }

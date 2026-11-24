@@ -573,10 +573,31 @@ export class Campaign {
     this.focus = Math.max(0, Math.min(bs.length - 1, this.focus || 0));
     bs.forEach((b, i) => b.classList.toggle("padfocus", i === this.focus));
   }
+  // keys / pad: move round the buttons as they sit on screen. Up / down: the nearest row above / below, the button
+  // in it closest across; left / right: the next button in the same row (at a row's end: the next / previous one in
+  // the list). The rows are not strictly aligned (the shop), so it goes by the buttons' real positions.
+  spatial(dir) {
+    const bs = this.buttons(), cur = bs[this.focus]; if (!cur) return null;
+    const c = (b) => { const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, h: r.height }; };
+    const p = c(cur), all = bs.map((b, i) => ({ i, ...c(b) })).filter((o) => o.i !== this.focus);
+    if (dir === "left" || dir === "right") {
+      const s = dir === "right" ? 1 : -1;
+      const row = all.filter((o) => Math.abs(o.y - p.y) < p.h * 0.5 && (o.x - p.x) * s > 4).sort((a, b) => (a.x - b.x) * s);
+      return row.length ? row[0].i : null;
+    }
+    const s = dir === "down" ? 1 : -1, ahead = all.filter((o) => (o.y - p.y) * s > p.h * 0.5);
+    if (!ahead.length) return null;
+    const nearY = Math.min(...ahead.map((o) => (o.y - p.y) * s));
+    const row = ahead.filter((o) => (o.y - p.y) * s < nearY + p.h * 0.5);
+    return row.sort((a, b) => Math.abs(a.x - p.x) - Math.abs(b.x - p.x))[0].i;
+  }
   move(d) {
     document.body.classList.add("padnav");
     const bs = this.buttons(); if (!bs.length) return;
-    this.focus = (this.focus + d + bs.length) % bs.length; this.markFocus();
+    const to = typeof d === "string" ? this.spatial(d) : null;
+    if (to != null) this.focus = to;
+    else { const k = d === "up" || d === "left" ? -1 : d === "down" || d === "right" ? 1 : d; this.focus = (this.focus + k + bs.length) % bs.length; }
+    this.markFocus();
     const b = bs[this.focus]; b.scrollIntoView?.({ block: "nearest" });
     if (b.dataset.act === "sel") { this.sel = Number(b.dataset.id); this.nodeInfo(); }
     if (this.preview && !this.preview.disposed) this.previewFor(b);
@@ -587,7 +608,7 @@ export class Campaign {
     addEventListener("keydown", (e) => {
       if (!open()) return;
       if (e.repeat || performance.now() - this.shownAt < 200) { e.preventDefault(); return; }
-      const d = { ArrowUp: -1, ArrowLeft: -1, ArrowDown: 1, ArrowRight: 1 }[e.key];
+      const d = { ArrowUp: "up", ArrowLeft: "left", ArrowDown: "down", ArrowRight: "right" }[e.key];
       if (d) { this.move(d); e.preventDefault(); }
       if (e.key === "Enter" || e.key === " ") { document.body.classList.add("padnav"); this.press(); e.preventDefault(); }
     });
@@ -597,10 +618,9 @@ export class Campaign {
       if (!open()) { prev = {}; return; }
       const p = [...(navigator.getGamepads ? navigator.getGamepads() : [])].find(Boolean); if (!p) return;
       const ax = p.axes[0] || 0, ay = p.axes[1] || 0, btn = (i) => !!(p.buttons[i] && p.buttons[i].pressed);
-      const now = { prev: btn(12) || btn(14) || ay < -0.6 || ax < -0.6, next: btn(13) || btn(15) || ay > 0.6 || ax > 0.6, ok: btn(0) || btn(9) };
-      if (!this.armed) { if (!now.ok && !now.prev && !now.next) this.armed = true; prev = now; return; }
-      if (now.prev && !prev.prev) this.move(-1);
-      if (now.next && !prev.next) this.move(1);
+      const now = { up: btn(12) || ay < -0.6, down: btn(13) || ay > 0.6, left: btn(14) || ax < -0.6, right: btn(15) || ax > 0.6, ok: btn(0) || btn(9) };
+      if (!this.armed) { if (!now.ok && !now.up && !now.down && !now.left && !now.right) this.armed = true; prev = now; return; }
+      for (const k of ["up", "down", "left", "right"]) if (now[k] && !prev[k]) this.move(k);
       if (now.ok && !prev.ok) this.press();
       prev = now;
     };

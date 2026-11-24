@@ -103,8 +103,11 @@ class Game {
       else if (!$("menu").classList.contains("hidden")) { items()[focus]?.click(); mark(); }
     };
     const menuOpen = () => !$("menu").classList.contains("hidden") || !$("end").classList.contains("hidden");
+    // the press that brought us back here ("Back" in the shop, Enter / A) must not also press a button of this menu:
+    // keys count only once the menu was already open on the last frame, the pad only after everything is let go
+    let wasOpen = false, armed = false;
     addEventListener("keydown", (e) => {
-      if (!menuOpen()) return;
+      if (!menuOpen() || !wasOpen) return;
       const k = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" }[e.key];
       if (k && !$("menu").classList.contains("hidden")) { move(k); e.preventDefault(); }
       if (e.key === "Enter" || e.key === " ") { confirm(); e.preventDefault(); }
@@ -114,7 +117,8 @@ class Game {
     let stickDir = null, repeatAt = 0;
     const poll = (t) => {
       requestAnimationFrame(poll);
-      if (!menuOpen()) { prev = {}; stickDir = null; return; }
+      if (!menuOpen()) { prev = {}; stickDir = null; wasOpen = false; armed = false; return; }
+      wasOpen = true;
       const p = [...(navigator.getGamepads ? navigator.getGamepads() : [])].find(Boolean);
       if (!p) return;
       const ax = p.axes[0] || 0, ay = p.axes[1] || 0, btn = (i) => !!(p.buttons[i] && p.buttons[i].pressed);
@@ -124,6 +128,7 @@ class Game {
       const dpad = btn(12) ? "up" : btn(13) ? "down" : btn(14) ? "left" : btn(15) ? "right" : null;
       const dir = dpad || (want && (!stickDir || want === stickDir) ? want : stickDir && mag >= 0.3 ? stickDir : null);
       const ok = btn(0) || btn(9);
+      if (!armed) { if (!ok && !dir && mag < 0.3) armed = true; prev = { dir, ok }; return; }
       if (!$("menu").classList.contains("hidden") && dir) {
         if (dir !== prev.dir) { move(dir); repeatAt = t + 500; }
         else if (t >= repeatAt) { move(dir); repeatAt = t + 220; }

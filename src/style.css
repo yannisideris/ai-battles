@@ -7,6 +7,8 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
   font-family: "Segoe UI", Tahoma, sans-serif; overflow: hidden; user-select: none; }
 #view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
 #hud { position: fixed; inset: 0; pointer-events: none; }
+/* the battle's scoreboard and key help only in battle: hidden behind the main menu and the campaign / shop screens */
+body:has(#menu:not(.hidden)) #hud, body:has(#camp:not(.hidden)) #hud { visibility: hidden; }
 #topbar { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); display: flex; gap: 18px;
   align-items: center; background: rgba(0,0,0,.45); padding: 6px 14px; border-radius: 10px; font-weight: 600; }
 .team { display: flex; align-items: center; gap: 8px; }

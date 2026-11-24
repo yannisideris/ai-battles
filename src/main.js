@@ -97,28 +97,31 @@ class Game {
       if (k && !$("menu").classList.contains("hidden")) { move(...k); e.preventDefault(); }
       if (e.key === "Enter" || e.key === " ") { confirm(); e.preventDefault(); }
     });
-    const poll = () => {
+    // the stick as on the shop screens: one direction at a time (the stronger axis), counts once past 0.6 and is free
+    // again only below 0.3 (no double steps from a shaky hand); held down it repeats calmly (after 0.5 s, every 0.22 s)
+    let stickDir = null, repeatAt = 0;
+    const STEP = { up: [-1, 0], down: [1, 0], left: [0, -1], right: [0, 1] };
+    const poll = (t) => {
       requestAnimationFrame(poll);
-      if (!menuOpen()) { prev = {}; return; }
+      if (!menuOpen()) { prev = {}; stickDir = null; return; }
       const p = [...(navigator.getGamepads ? navigator.getGamepads() : [])].find(Boolean);
       if (!p) return;
       const ax = p.axes[0] || 0, ay = p.axes[1] || 0, btn = (i) => !!(p.buttons[i] && p.buttons[i].pressed);
-      const now = { up: btn(12) || ay < -0.6, down: btn(13) || ay > 0.6, left: btn(14) || ax < -0.6, right: btn(15) || ax > 0.6, ok: btn(0) || btn(9) };
-      const edge = (k) => now[k] && !prev[k];
-      // holding a direction repeats slowly
-      const anyDir = now.up || now.down || now.left || now.right;
-      held = anyDir ? held + 1 : 0;
-      const rep = held > 24 && held % 10 === 0;
-      if (!$("menu").classList.contains("hidden")) {
-        if (edge("up") || (rep && now.up)) move(-1, 0);
-        if (edge("down") || (rep && now.down)) move(1, 0);
-        if (edge("left") || (rep && now.left)) move(0, -1);
-        if (edge("right") || (rep && now.right)) move(0, 1);
+      const mag = Math.max(Math.abs(ax), Math.abs(ay));
+      if (stickDir && mag < 0.3) stickDir = null;
+      const want = mag > 0.6 ? (Math.abs(ax) > Math.abs(ay) ? (ax < 0 ? "left" : "right") : (ay < 0 ? "up" : "down")) : null;
+      const dpad = btn(12) ? "up" : btn(13) ? "down" : btn(14) ? "left" : btn(15) ? "right" : null;
+      const dir = dpad || (want && (!stickDir || want === stickDir) ? want : stickDir && mag >= 0.3 ? stickDir : null);
+      const ok = btn(0) || btn(9);
+      if (!$("menu").classList.contains("hidden") && dir) {
+        if (dir !== prev.dir) { move(...STEP[dir]); repeatAt = t + 500; }
+        else if (t >= repeatAt) { move(...STEP[dir]); repeatAt = t + 220; }
       }
-      if (edge("ok")) confirm();
-      prev = now;
+      if (!dpad && want) stickDir = want;
+      if (ok && !prev.ok) confirm();
+      prev = { dir, ok };
     };
-    mark(); poll();
+    mark(); poll(performance.now());
   }
 
   async start() {

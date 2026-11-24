@@ -78,7 +78,7 @@ class Game {
     };
     const move = (dr, dc) => {
       document.body.classList.add("padnav");
-      if (dr) { row = (row + dr + rows.length + 2) % (rows.length + 2); mark(); }
+      if (dr) { row = Math.max(0, Math.min(rows.length + 1, row + dr)); mark(); }   // stops at the top / bottom (no wrap-round)
       if (dc && row < rows.length) {
         const bs = [...rows[row].querySelectorAll("button")], i = bs.findIndex((b) => b.classList.contains("sel"));
         bs[Math.max(0, Math.min(bs.length - 1, i + dc))].click();

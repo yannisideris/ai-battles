@@ -65,7 +65,7 @@ body:has(#menu:not(.hidden)) #hud, body:has(#camp:not(.hidden)) #hud { visibilit
 /* menu with gamepad / arrow keys: the chosen option of the row you are on lights up yellow
    (only after the pad / keys are used - with the mouse the menu looks exactly as before) */
 .padnav .row.rowfocus button.sel { background: #f1c40f; border-color: #f1c40f; color: #111; }
-.padnav #start.padfocus { background: #f1c40f; border-color: #f1c40f; color: #111; }
+.padnav #start.padfocus, .padnav #campaign.padfocus { background: #f1c40f; border-color: #f1c40f; color: #111; }
 /* order being picked (Enter / RB, then left-right): the whole button lights up */
 #orders button.focus { background: #f1c40f; border-color: #f1c40f; color: #111; }
 

@@ -34,7 +34,7 @@ const T = {
     fight: "Μάχη!", army: "Στρατός", cont: "Συνέχεια", coins: "νομίσματα", battle: "μάχη",
     kinds: { normal: "Μάχη", ambush: "Ενέδρα", defend: "Υπεράσπιση", elite: "Ισχυρός εχθρός", castle: "Το κάστρο" },
     kindHelp: { normal: "", ambush: "ξεκινάς κυκλωμένος από το πλάι", defend: (t) => `κράτα ${mmss(t)} ή νίκησέ τους`, elite: "δυσκολότερη, καλύτερη αμοιβή", castle: "η τελική μάχη" },
-    terr: { village: "χωριό", forest: "δάσος", open: "ανοιχτός κάμπος", river: "ποτάμι", graveyard: "νεκροταφείο", ruins: "ερείπια", hills: "λόφοι" }, hill: "με λόφο",
+    terr: { village: "χωριό", forest: "δάσος", open: "ανοιχτός κάμπος", river: "ποτάμι", graveyard: "νεκροταφείο", ruins: "ερείπια", hills: "λόφοι", castle: "τα τείχη του κάστρου" }, hill: "με λόφο",
     themes: { shieldwall: "τείχος ασπίδων", arrows: "βροχή βελών", spears: "λόγχες", magic: "μαγεία", horde: "ορδή", legion: "λεγεώνα", mixed: "λίγο απ' όλα" },
     power: ["εύκολη", "ισάξια", "δύσκολη", "πολύ δύσκολη"], enemies: "εχθροί", reward: "αμοιβή",
     pick: "Διάλεξε τον επόμενο κόμβο", inField: "στη μάχη", reserve: "εφεδρεία", lead: "Αρχηγός", makeLead: "Αρχηγός",
@@ -57,7 +57,7 @@ const T = {
     fight: "Battle!", army: "Army", cont: "Continue", coins: "coins", battle: "battle",
     kinds: { normal: "Battle", ambush: "Ambush", defend: "Defence", elite: "Strong enemy", castle: "The castle" },
     kindHelp: { normal: "", ambush: "you start flanked", defend: (t) => `hold ${mmss(t)} or beat them`, elite: "harder, better reward", castle: "the final battle" },
-    terr: { village: "village", forest: "forest", open: "open field", river: "river", graveyard: "graveyard", ruins: "ruins", hills: "hills" }, hill: "with a hill",
+    terr: { village: "village", forest: "forest", open: "open field", river: "river", graveyard: "graveyard", ruins: "ruins", hills: "hills", castle: "the castle walls" }, hill: "with a hill",
     themes: { shieldwall: "shield wall", arrows: "rain of arrows", spears: "spears", magic: "magic", horde: "horde", legion: "legion", mixed: "a bit of everything" },
     power: ["easy", "even", "hard", "very hard"], enemies: "enemies", reward: "reward",
     pick: "Pick the next node", inField: "in battle", reserve: "reserve", lead: "Leader", makeLead: "Leader",
@@ -154,7 +154,7 @@ function makeMap(seed) {
     if (kind === "defend") budget *= 1.2;
     if (last) budget = base * 1.4;
     n.kind = kind;
-    n.terrain = last ? "ruins" : pickR(r, TERRAINS);
+    n.terrain = last ? "castle" : pickR(r, TERRAINS);   // the castle: its own battlefield (walls, gate, towers)
     // high ground only on some battlefields: always on "hills", now and then on open / forest / ruins
     n.hills = n.terrain === "hills" ? 2 : ["open", "forest", "ruins"].includes(n.terrain) && r() < 0.35 ? 1 : 0;
     // simpler armies early, the special ones later; the legion (the strongest mix) only near the castle and at it
@@ -202,12 +202,16 @@ export class Campaign {
   }
   startSkirmish() {
     const g = this.game, s = this.state, side = s.side, foe = side === "human" ? "skeleton" : "human";
-    const themes = Object.keys(THEMES), enemy = enemyArmy(Math.round(s.budget * (0.9 + Math.random() * 0.2)), Math.random, 1, themes[Math.floor(Math.random() * themes.length)]);
-    const mine = this.field().map((e) => ({ type: e.type, vet: 0, id: e.id, lead: e.id === s.lead }));
-    // a random battlefield (hills as in the campaign); the seed is kept so "Replay battle" gives the very same one
-    const terrain = pickR(Math.random, TERRAINS);
+    // a random battlefield (hills as in the campaign; now and then the enemy's castle); the seed is kept so
+    // "Replay battle" gives the very same one
+    const terrain = pickR(Math.random, [...TERRAINS, "castle"]);
     const hills = terrain === "hills" ? 2 : ["open", "forest", "ruins"].includes(terrain) && Math.random() < 0.35 ? 1 : 0;
-    g.campaignBattle = { armies: { [side]: mine, [foe]: enemy }, terrain, hills, spawn: null, kind: "skirmish", seed: (Math.random() * 1e9) | 0 };
+    // behind walls the defenders are much stronger (sims: 8 of 10 with equal armies): they get less money
+    const themes = Object.keys(THEMES), budget = s.budget * (0.9 + Math.random() * 0.2) * (terrain === "castle" ? 0.8 : 1);
+    const enemy = enemyArmy(Math.round(budget), Math.random, 1, themes[Math.floor(Math.random() * themes.length)]);
+    const mine = this.field().map((e) => ({ type: e.type, vet: 0, id: e.id, lead: e.id === s.lead }));
+    g.campaignBattle = { armies: { [side]: mine, [foe]: enemy }, terrain, hills, spawn: null, kind: "skirmish", seed: (Math.random() * 1e9) | 0,
+      castleSide: foe === "human" ? 1 : -1 };
     g.settings.role = "captain";
     this.hide(); g.start();
   }
@@ -435,7 +439,7 @@ export class Campaign {
       const z = 0.25 * (side === "human" ? 27 : -27), from = Math.random() < 0.5 ? -1 : 1;
       spawn = { [side]: { x: 0, z, facing: side === "human" ? Math.PI : 0 }, [foe]: { x: from * 15, z: z * 0.6, facing: from < 0 ? Math.PI / 2 : -Math.PI / 2 } };
     }
-    return { armies, terrain: n.terrain, hills: n.hills || 0, spawn, kind: n.kind, defendT: n.defendT || 0 };
+    return { armies, terrain: n.terrain, hills: n.hills || 0, spawn, kind: n.kind, defendT: n.defendT || 0, castleSide: foe === "human" ? 1 : -1 };
   }
   // called by Game.finish
   afterBattle(won, info) {

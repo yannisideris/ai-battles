@@ -11,6 +11,7 @@
 //  * Archers prefer shooting spots next to cover (houses/trees/rocks) and kite away from melee.
 //  * Wounded, frightened units fall back to their captain to regroup, then return to the fight.
 import * as THREE from "three";
+import { TEAM } from "./config.js";
 
 export const ORDERS = [
   { key: "attack", label: "Attack" },      // charge: hit harder, guard less, chase anything near
@@ -118,6 +119,12 @@ export class General {
     const quiet = this.game.time - (this.game.lastHitTime ?? 0);
     if (plan.stance === "hold" && quiet > 20 && ratio >= 0.9) { plan.stance = "advance"; plan.note = "Losing patience: advancing"; }
     if (plan.stance === "fallback" && quiet > 25 && avgMorale > 35) { plan.stance = "advance"; plan.protect = false; plan.note = "Regrouped: attacking again"; }
+    // the castle: its defenders hold the courtyard behind their walls and let the attackers come through the gate or
+    // the breach (unless they are falling apart). The endgame below still sends everyone out at the very end.
+    const w = this.game.world;
+    if (w.terrain === "castle" && Math.sign(TEAM[this.team].spawnZ) === (w.castleSide ?? -1) && plan.stance !== "fallback") {
+      plan.stance = "hold"; plan.flank = null; plan.note = "Holding the walls";
+    }
     // endgame: with only a few units left nobody holds or retreats any more - find them and finish it
     if (this.game.endgame) { plan.stance = "advance"; plan.protect = false; plan.flank = null; plan.note = "Hunting the last ones"; }
     if (this.team !== this.game.settings.side && !this.game.diff.flank) { plan.flank = null; if (plan.note && plan.note.includes("flank")) plan.note = "Advancing"; }
@@ -396,8 +403,11 @@ export class Brain {
     // ---- melee: march in formation until the enemy is close, then engage
     // mop-up: with only a couple of enemies left (or no soldiers of our own) even a careful captain goes in
     const mopUp = foes.length <= 2 || !allies.some((a) => a.line);
-    const engageR = g.endgame ? 999 : mopUp ? 30 : ord.charge ? 14 : (u.s.engage ?? (u.commander ? 3.0 : 5.5));
-    this.engaged = nearest < engageR || (this.engaged && nearest < 9);
+    // castle defenders holding the courtyard: they dash out at whoever comes near the gate or the breach (a few metres
+    // past the wall), and once nobody is close they go back to their places inside (the formation slots below)
+    const sally = plan.stance === "hold" && g.world.terrain === "castle" && Math.sign(TEAM[u.team].spawnZ) === (g.world.castleSide ?? -1);
+    const engageR = g.endgame ? 999 : mopUp ? 30 : ord.charge ? 14 : sally && !u.commander ? 11 : (u.s.engage ?? (u.commander ? 3.0 : 5.5));
+    this.engaged = nearest < engageR || (this.engaged && nearest < (sally ? 13 : 9));
     const flanker = general.flankers.has(u);
     if (flanker && !this.flankReached && best && plan.flank) {
       const fp = general.flankPoint(u);
@@ -566,7 +576,8 @@ export class Brain {
     const u = this.u, w = u.game.world, g = u.game;
     // last-resort safety net: a long lull in the endgame -> head straight for the target and let the body
     // collision slide us round whatever is in the way (no grid path that might be failing)
-    if (g.endgame && g.time - g.lastHitTime > 40) return norm(tx - u.pos.x, tz - u.pos.z);
+    // (not at the castle: its wall runs across the whole field, straight ahead would just push into it)
+    if (g.endgame && g.time - g.lastHitTime > 40 && w.terrain !== "castle") return norm(tx - u.pos.x, tz - u.pos.z);
     if (w.walkLineClear(u.pos.x, u.pos.z, tx, tz)) { this.path = null; return norm(tx - u.pos.x, tz - u.pos.z); }
     this.repath = (this.repath ?? 0) - dt;
     if (!this.path || this.repath <= 0 || Math.hypot(this.pathGoal[0] - tx, this.pathGoal[1] - tz) > 1.5) {

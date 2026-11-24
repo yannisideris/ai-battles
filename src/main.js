@@ -149,7 +149,7 @@ class Game {
     Object.assign(this.sun.shadow.camera, { left: -16, right: 16, top: 16, bottom: -16, near: 1, far: 60 });
     this.sun.shadow.bias = -0.0008;
     this.scene.add(this.sun, this.sun.target);
-    this.world = new World(this.scene, this.q, this.campaignBattle?.seed, GALLERY ? "empty" : this.campaignBattle?.terrain ?? DEV_TERRAIN ?? undefined, { hills: this.campaignBattle?.hills ?? DEV_HILLS });
+    this.world = new World(this.scene, this.q, this.campaignBattle?.seed, GALLERY ? "empty" : this.campaignBattle?.terrain ?? DEV_TERRAIN ?? undefined, { hills: this.campaignBattle?.hills ?? DEV_HILLS, castle: this.campaignBattle?.castleSide });
     // a battlefield's own light (the graveyard at dusk)
     const mood = this.world.mood;
     if (mood) {
@@ -220,7 +220,7 @@ class Game {
   async runCampaignBattle(cb) {
     this.campaignBattle = cb; this.armySpec = cb.armies;
     for (const c of [...this.scene.children]) if (c !== this.sun && c !== this.sun.target && !c.isLight) this.scene.remove(c);
-    this.world = new World(this.scene, this.q, undefined, cb.terrain, { hills: cb.hills });
+    this.world = new World(this.scene, this.q, undefined, cb.terrain, { hills: cb.hills, castle: cb.castleSide });
     await loadUnitModels(this.q, Object.entries(cb.armies).flatMap(([team, list]) => list.map((e) => [team, e.type])));
     this.spawnArmies(); this.arrows = []; this.time = 0; this.pending = []; this.ended = false; this.lastHitTime = 0; this.winner = null; this.lastKillerTeam = null;
     this.generals = { human: new General(this, "human"), skeleton: new General(this, "skeleton") };
@@ -871,7 +871,7 @@ class Game {
     this.pending = this.pending.filter((x) => x.at > this.time);
     // endgame: few units left (or a long lull) -> everyone hunts, nobody flees (see ai.js)
     { const h = this.alive("human").length, k = this.alive("skeleton").length;
-      this.endgame = Math.min(h, k) <= 2 || h + k <= 6 || (this.time - this.lastHitTime > 30 && this.time > 40); }
+      this.endgame = Math.min(h, k) <= 2 || h + k <= 6 || (this.time - this.lastHitTime > 30 && this.time > (this.world.terrain === "castle" ? 75 : 40)); }   // (the castle: a longer walk to the walls)
     if (!this.ended) { this.generals.human.update(dt); this.generals.skeleton.update(dt); }
     // alternate the update order every frame so neither side always reacts last
     this.flip = !this.flip;

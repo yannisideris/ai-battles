@@ -23,7 +23,7 @@ export function toonGradient() {
 
 export class World {
   constructor(scene, quality, seed = (Math.random() * 1e9) | 0, terrain = "village", opts = {}) {
-    this.scene = scene; this.q = quality; this.rand = rng(seed); this.terrain = terrain;
+    this.scene = scene; this.q = quality; this.rand = rng(seed); this.terrain = terrain; this.castleSide = opts.castle;
     this.grid = new Uint8Array(GW * GH);
     // exact obstacle outlines for body collision (the 1 m grid stays for path finding and arrow line-of-sight)
     this.shapes = [];
@@ -534,6 +534,66 @@ export class World {
       bloom.count = n; this.group.add(bloom);
       this.group.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(stems), new THREE.LineBasicMaterial({ color: 0x4f8a35 })));
       trees(2, 2); rocks(5);
+    } else if (kind === "castle") {
+      const s = this.castleSide ?? -1;   // (dev ?terrain=castle: the skeletons hold it)
+      this.buildCastle(s);
+      // the approach: a few trees and rocks well in front of the walls
+      for (let i = 0; i < 14; i++) {
+        const x = (r() - 0.5) * (MAP_W - 6), z = -s * (2 + r() * 14);
+        if (this.areaFree(x - 0.5, z - 0.5, x + 0.5, z + 0.5)) (r() < 0.6 ? this.addTree(x, z) : this.addRock(x, z));
+      }
+    }
+  }
+  // the enemy castle (the campaign's last battle): a curtain wall across the field in front of the defenders,
+  // a gate on the road between two towers, a breach further along (a second way in), corner towers, and the
+  // keep beyond the edge of the field. s = +1: the defenders hold the south end (humans), -1: the north.
+  buildCastle(s) {
+    const r = this.rand, WZ = 19.5 * s, stone = this.mat(0xb8ae9a), dark = this.mat(0x9f9584), roof = this.mat(0x9c4a4a), wood = this.mat(0x6b4a2e);
+    const add = (m) => { m.castShadow = this.q.shadows; m.receiveShadow = true; this.group.add(m); return m; };
+    const box = (w, h, d, mat, x, y, z) => { const b = add(new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat)); b.position.set(x, y, z); return b; };
+    const gx = this.roadX ?? 0, bx = gx + (gx <= 0 ? 12.5 : -12.5), H = 2.4;
+    // wall pieces between the gaps: gate (4 m) and breach (3 m)
+    const gaps = [[gx - 2, gx + 2], [bx - 1.5, bx + 1.5]].sort((a, b) => a[0] - b[0]);
+    const runs = [[-MAP_W / 2, gaps[0][0]], [gaps[0][1], gaps[1][0]], [gaps[1][1], MAP_W / 2]];
+    for (const [x0, x1] of runs) {
+      const len = x1 - x0, cx = (x0 + x1) / 2;
+      box(len, H, 1.0, stone, cx, H / 2, WZ);
+      for (let x = x0 + 0.35; x < x1 - 0.2; x += 0.7) box(0.4, 0.4, 1.0, dark, x, H + 0.2, WZ);   // crenellations
+      this.markRect(x0, WZ - 0.5, x1, WZ + 0.5, BLOCK); this.shapes.push({ x: cx, z: WZ, hw: len / 2, hd: 0.55 });
+    }
+    // towers: either side of the gate and at the corners (round, with a red cone roof)
+    const tower = (x, rad, h) => {
+      add(new THREE.Mesh(new THREE.CylinderGeometry(rad, rad * 1.08, h, 14), stone)).position.set(x, h / 2, WZ);
+      for (let k = 0; k < 10; k++) { const a = (k / 10) * Math.PI * 2; box(0.35, 0.4, 0.35, dark, x + Math.cos(a) * rad * 0.9, h + 0.2, WZ + Math.sin(a) * rad * 0.9); }
+      add(new THREE.Mesh(new THREE.ConeGeometry(rad * 1.05, rad * 1.6, 14), roof)).position.set(x, h + 0.4 + rad * 0.8, WZ);
+      this.markRect(x - rad, WZ - rad, x + rad, WZ + rad, BLOCK); this.shapes.push({ c: true, x, z: WZ, r: rad + 0.05 });
+    };
+    tower(gx - 3.3, 1.3, 3.8); tower(gx + 3.3, 1.3, 3.8); tower(-MAP_W / 2 + 1.6, 1.4, 3.4); tower(MAP_W / 2 - 1.6, 1.4, 3.4);
+    // the gate: an arch over the opening, the doors swung open inward against the wall
+    box(4.4, 0.7, 1.2, stone, gx, H + 0.75, WZ);
+    for (const sd of [-1, 1]) { const d = box(1.9, 2.2, 0.15, wood, gx + sd * 2.9, 1.1, WZ + s * 1.1); d.rotation.y = sd * s * 0.25; }
+    // the breach: the wall ends broken, its stones lying in the gap's mouth (only looks, not in the way)
+    for (let k = 0; k < 9; k++) {
+      const st = add(new THREE.Mesh(new THREE.DodecahedronGeometry(0.16 + r() * 0.18, 0), r() < 0.5 ? stone : dark));
+      const side = r() < 0.5 ? -1 : 1;
+      st.position.set(bx + side * (1.3 + r() * 0.6), 0.12, WZ + (r() - 0.5) * 2.4); st.rotation.set(r() * 3, r() * 3, r() * 3);
+    }
+    for (const sd of [-1, 1]) for (let k = 0; k < 3; k++) box(0.5, 0.35 + r() * 0.5, 1.0, dark, bx + sd * (1.5 + k * 0.5), H + 0.1 - k * 0.15, WZ);   // jagged ends
+    // the keep, beyond the far end of the field (scenery: nobody walks there)
+    const KZ = 39 * s;
+    box(12, 7, 7, stone, gx, 3.5, KZ);
+    for (let x = -5.7; x <= 5.8; x += 0.8) box(0.45, 0.5, 7, dark, gx + x, 7.25, KZ);
+    add(new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.3, 10, 16), stone)).position.set(gx, 5, KZ + s * 1.5);
+    add(new THREE.Mesh(new THREE.ConeGeometry(2.5, 3.6, 16), roof)).position.set(gx, 11.8, KZ + s * 1.5);
+    for (const sd of [-1, 1]) {
+      add(new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.6, 8.5, 14), stone)).position.set(gx + sd * 7, 4.25, KZ);
+      add(new THREE.Mesh(new THREE.ConeGeometry(1.7, 2.6, 14), roof)).position.set(gx + sd * 7, 9.8, KZ);
+    }
+    box(2.2, 3, 0.2, this.mat(0x2e2a33), gx, 1.5, KZ - s * 3.55);   // in line with the road and the gate   // the keep's door, facing the field
+    // banners on the gate towers
+    for (const sd of [-1, 1]) {
+      const pole = add(new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.6, 6), wood)); pole.position.set(gx + sd * 3.3, 3.8 + 0.4 + 2.2 + 0.6, WZ);
+      box(0.05, 0.6, 0.9, this.mat(s > 0 ? 0x3fa7c9 : 0xc0507e), gx + sd * 3.3, 3.8 + 0.4 + 2.2 + 1.0, WZ - 0.45);
     }
   }
   addDeadTree(x, z) {

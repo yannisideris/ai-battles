@@ -67,40 +67,51 @@ class Game {
     const names = this.settings.side === "skeleton" ? ["Skeleton", "Lich", "Death Knight"] : ["Knight", "Ranger", "Paladin"];
     document.querySelectorAll("#menu button[data-captain]").forEach((b, i) => { b.textContent = names[i]; });
   }
-  // gamepad (and arrow keys) on the menus: up/down picks a row, left/right picks the option, A / Start / Enter confirms
+  // gamepad (and arrow keys) on the main menu: the focus moves button by button as they sit on screen (up / down: the
+  // button in the next row that covers most of the current one), A / Enter / Space picks the focused one.
+  // Passing over an option does not change it; the picked value keeps its own look, the focus is an outline.
   menuPad() {
-    const rows = [...document.querySelectorAll("#menu .row")];
-    let row = 0, prev = {}, held = 0;
-    const mark = () => {
-      rows.forEach((r, i) => r.classList.toggle("rowfocus", i === row));
-      $("start").classList.toggle("padfocus", row === rows.length);
-      $("campaign").classList.toggle("padfocus", row === rows.length + 1);
-    };
-    const move = (dr, dc) => {
+    const items = () => [...document.querySelectorAll("#menu .row button"), $("start"), $("campaign")];
+    let focus = items().indexOf($("start")), prev = {};
+    const mark = () => items().forEach((b, i) => b.classList.toggle("padfocus", i === focus));
+    const move = (dir) => {
       document.body.classList.add("padnav");
-      if (dr) { row = Math.max(0, Math.min(rows.length + 1, row + dr)); mark(); }   // stops at the top / bottom (no wrap-round)
-      if (dc && row < rows.length) {
-        const bs = [...rows[row].querySelectorAll("button")], i = bs.findIndex((b) => b.classList.contains("sel"));
-        bs[Math.max(0, Math.min(bs.length - 1, i + dc))].click();
+      const bs = items(), cur = bs[focus]?.getBoundingClientRect(); if (!cur) return;
+      const cy = cur.top + cur.height / 2, cx = cur.left + cur.width / 2;
+      const all = bs.map((b, i) => ({ i, r: b.getBoundingClientRect() })).filter((o) => o.i !== focus);
+      let to = null;
+      if (dir === "left" || dir === "right") {   // same row only; stops at its ends
+        const s = dir === "right" ? 1 : -1;
+        const row = all.filter((o) => Math.abs(o.r.top + o.r.height / 2 - cy) < cur.height * 0.5 && (o.r.left + o.r.width / 2 - cx) * s > 4)
+          .sort((a, b) => (a.r.left - b.r.left) * s);
+        to = row[0]?.i;
+      } else {   // the nearest row above / below; in it the button overlapping the current one most (ties: the nearest)
+        const s = dir === "down" ? 1 : -1, my = (o) => (o.r.top + o.r.height / 2 - cy) * s;
+        const ahead = all.filter((o) => my(o) > cur.height * 0.5);
+        if (ahead.length) {
+          const near = Math.min(...ahead.map(my)), row = ahead.filter((o) => my(o) < near + cur.height * 0.5);
+          const ov = (o) => Math.max(0, Math.min(o.r.right, cur.right) - Math.max(o.r.left, cur.left));
+          to = row.sort((a, b) => ov(b) - ov(a) || Math.abs(a.r.left + a.r.width / 2 - cx) - Math.abs(b.r.left + b.r.width / 2 - cx))[0].i;
+        }
       }
+      if (to != null) { focus = to; mark(); }
     };
     addEventListener("mousemove", () => document.body.classList.remove("padnav"));
     const confirm = () => {
       document.body.classList.add("padnav");
       if (!$("end").classList.contains("hidden")) $("again").click();
-      else if (!$("menu").classList.contains("hidden")) { if (row === rows.length) $("start").click(); else if (row === rows.length + 1) $("campaign").click(); else { row = rows.length; mark(); } }
+      else if (!$("menu").classList.contains("hidden")) { items()[focus]?.click(); mark(); }
     };
     const menuOpen = () => !$("menu").classList.contains("hidden") || !$("end").classList.contains("hidden");
     addEventListener("keydown", (e) => {
       if (!menuOpen()) return;
-      const k = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] }[e.key];
-      if (k && !$("menu").classList.contains("hidden")) { move(...k); e.preventDefault(); }
+      const k = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" }[e.key];
+      if (k && !$("menu").classList.contains("hidden")) { move(k); e.preventDefault(); }
       if (e.key === "Enter" || e.key === " ") { confirm(); e.preventDefault(); }
     });
     // the stick as on the shop screens: one direction at a time (the stronger axis), counts once past 0.6 and is free
     // again only below 0.3 (no double steps from a shaky hand); held down it repeats calmly (after 0.5 s, every 0.22 s)
     let stickDir = null, repeatAt = 0;
-    const STEP = { up: [-1, 0], down: [1, 0], left: [0, -1], right: [0, 1] };
     const poll = (t) => {
       requestAnimationFrame(poll);
       if (!menuOpen()) { prev = {}; stickDir = null; return; }
@@ -114,8 +125,8 @@ class Game {
       const dir = dpad || (want && (!stickDir || want === stickDir) ? want : stickDir && mag >= 0.3 ? stickDir : null);
       const ok = btn(0) || btn(9);
       if (!$("menu").classList.contains("hidden") && dir) {
-        if (dir !== prev.dir) { move(...STEP[dir]); repeatAt = t + 500; }
-        else if (t >= repeatAt) { move(...STEP[dir]); repeatAt = t + 220; }
+        if (dir !== prev.dir) { move(dir); repeatAt = t + 500; }
+        else if (t >= repeatAt) { move(dir); repeatAt = t + 220; }
       }
       if (!dpad && want) stickDir = want;
       if (ok && !prev.ok) confirm();

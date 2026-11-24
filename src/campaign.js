@@ -612,18 +612,27 @@ export class Campaign {
       if (d) { this.move(d); e.preventDefault(); }
       if (e.key === "Enter" || e.key === " ") { document.body.classList.add("padnav"); this.press(); e.preventDefault(); }
     });
-    let prev = {};
-    const poll = () => {
+    // the stick: one direction at a time (the stronger axis), it counts once pushed past 0.6 and is free again only
+    // below 0.3 (no double steps from a shaky hand), and held down it repeats calmly (after 0.5 s, then every 0.22 s)
+    let prev = {}, stickDir = null, repeatAt = 0;
+    const poll = (t) => {
       requestAnimationFrame(poll);
-      if (!open()) { prev = {}; return; }
+      if (!open()) { prev = {}; stickDir = null; return; }
       const p = [...(navigator.getGamepads ? navigator.getGamepads() : [])].find(Boolean); if (!p) return;
       const ax = p.axes[0] || 0, ay = p.axes[1] || 0, btn = (i) => !!(p.buttons[i] && p.buttons[i].pressed);
-      const now = { up: btn(12) || ay < -0.6, down: btn(13) || ay > 0.6, left: btn(14) || ax < -0.6, right: btn(15) || ax > 0.6, ok: btn(0) || btn(9) };
-      if (!this.armed) { if (!now.ok && !now.up && !now.down && !now.left && !now.right) this.armed = true; prev = now; return; }
-      for (const k of ["up", "down", "left", "right"]) if (now[k] && !prev[k]) this.move(k);
-      if (now.ok && !prev.ok) this.press();
-      prev = now;
+      const mag = Math.max(Math.abs(ax), Math.abs(ay));
+      if (stickDir && mag < 0.3) stickDir = null;
+      const want = mag > 0.6 ? (Math.abs(ax) > Math.abs(ay) ? (ax < 0 ? "left" : "right") : (ay < 0 ? "up" : "down")) : null;
+      const dpad = btn(12) ? "up" : btn(13) ? "down" : btn(14) ? "left" : btn(15) ? "right" : null;
+      const dir = dpad || (want && (!stickDir || want === stickDir) ? want : stickDir && mag >= 0.3 ? stickDir : null);
+      const ok = btn(0) || btn(9);
+      if (!this.armed) { if (!ok && !dir) this.armed = true; prev = { dir, ok }; return; }
+      if (dir && dir !== prev.dir) { this.move(dir); repeatAt = t + 500; }
+      else if (dir && t >= repeatAt) { this.move(dir); repeatAt = t + 220; }
+      if (!dpad && want) stickDir = want;
+      if (ok && !prev.ok) this.press();
+      prev = { dir, ok };
     };
-    poll();
+    poll(performance.now());
   }
 }

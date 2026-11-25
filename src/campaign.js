@@ -9,7 +9,7 @@ import { MapDiorama } from "./overmap3d.js";
 export const PRICE = { soldier: 20, archer: 25, spearman: 25, shieldbearer: 30, scout: 25, brute: 45, mage: 45, support: 50, monster: 120,
   captain: 100, captain_ranged: 100, captain_heavy: 110 };
 const SHOP = ["soldier", "archer", "spearman", "shieldbearer", "scout", "brute", "mage", "support", "monster", "captain", "captain_ranged", "captain_heavy"];
-export const MAX_FIELD = 16, MAX_CAPTAINS = 3;
+export const MAX_FIELD = 24, MAX_CAPTAINS = 3;   // (was 16)
 const KEY = (s) => `aib.campaign.${s}`;
 const COLS = 8;              // 0 = your camp, 1..6 battles, 7 = the enemy castle
 const TERRAINS = ["village", "forest", "open", "river", "graveyard", "ruins", "hills"];
@@ -152,7 +152,8 @@ function makeMap(seed) {
     const base = 230 + n.col * 85 + n.col * n.col * 10;
     let budget = base * (n.col <= 2 ? 0.62 + r() * 0.35 : 0.72 + r() * 0.65);   // (column 2 comes right after the bloody opening)
     if (kind === "defend") budget *= 1.2;
-    if (last) budget = base * 1.4;
+    if (n.col >= 5 && !last) budget *= 1.1;   // (24-unit armies: the last steps a little stronger)
+    if (last) budget = base * 1.7;   // (was 1.4 with 16-unit armies: the castle fell 8 in 20 in sims)
     n.kind = kind;
     n.terrain = last ? "castle" : pickR(r, TERRAINS);   // the castle: its own battlefield (walls, gate, towers)
     // high ground only on some battlefields: always on "hills", now and then on open / forest / ruins
@@ -520,7 +521,7 @@ export class Campaign {
       if (!c || trainCost(c) > s.coins) break;
       s.coins -= trainCost(c); c.vet = (c.vet || 0) + 1;
     }
-    // the best 16 go into battle (captains, then by worth: veterans and specials first)
+    // the best MAX_FIELD go into battle (captains, then by worth: veterans and specials first)
     const best = [...s.roster].sort((x, y) => (isCap(y.type) - isCap(x.type)) || unitValue(y) - unitValue(x)).slice(0, MAX_FIELD);
     s.roster.forEach((e) => { e.field = best.includes(e); }); this.fixLead();
   }

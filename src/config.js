@@ -40,9 +40,17 @@ export function formation(types) {
   const front = types.filter((t) => LINE_TYPES.includes(t)), back = types.filter((t) => BACK_TYPES.includes(t));
   const caps = types.filter((t) => CAPTAIN_TYPES.includes(t));
   const out = [];
-  caps.forEach((t, i) => out.push([t, (i - (caps.length - 1) / 2) * 1.6, 1.6]));
-  front.forEach((t, i) => out.push([t, (i - (front.length - 1) / 2) * 1.6, 0]));
-  back.forEach((t, i) => out.push([t, (i - (back.length - 1) / 2) * 1.8, 3 + (i % 2) * 0.4]));
+  // up to 12 a row (bigger armies: a second line behind the first), then the captains, then the shooters
+  const rows = (list, gap, z0, dzRow, stagger) => {
+    for (let r = 0; r * 12 < list.length; r++) {
+      const row = list.slice(r * 12, r * 12 + 12);
+      row.forEach((t, i) => out.push([t, (i - (row.length - 1) / 2) * gap + (r % 2) * gap * 0.5 * (row.length < 12 ? 0 : 1), z0 + r * dzRow + (stagger ? (i % 2) * 0.4 : 0)]));
+    }
+    return Math.max(1, Math.ceil(list.length / 12));
+  };
+  const nFront = rows(front, 1.6, 0, 1.3, false);
+  caps.forEach((t, i) => out.push([t, (i - (caps.length - 1) / 2) * 1.6, 1.6 + (nFront - 1) * 1.3]));
+  rows(back, 1.8, 3 + (nFront - 1) * 1.3, 1.6, true);
   return out;
 }
 // skirmish armies: "classic" is the v1.0 line-up (unchanged), "mixed" uses every role

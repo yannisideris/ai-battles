@@ -482,6 +482,7 @@ class Game {
     $("replay").classList.toggle("hidden", !this.lastSkirmish);
     $("end-sub").textContent = won ? (routed ? this.ui.enemyRouted : this.ui.enemyWiped) : (routed ? this.ui.youRouted : this.ui.youWiped);
     $("end").classList.remove("hidden");
+    this.menuFocusReset?.();   // show the initial selection before the first pad / keyboard input
   }
 
   // monster slam: everyone (both sides) close to the point of impact is thrown back and stunned; enemies are hurt

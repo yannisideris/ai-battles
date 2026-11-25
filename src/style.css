@@ -62,8 +62,8 @@ body:has(#menu:not(.hidden)) #hud, body:has(#camp:not(.hidden)) #hud { visibilit
 #end .panel { text-align: center; min-width: 380px; }
 #end .panel .big { display: block; width: 100%; margin-top: 8px; }
 #again-back { margin-top: 12px; }
-.padnav #end button.padfocus { background: #f1c40f; border-color: #f1c40f; color: #111; }
-.padnav #end .big:not(.padfocus) { background: #145a46; border-color: var(--accent); color: var(--text); }   /* pad / keys: only the focused button stands out */
+#end button.padfocus { background: #f1c40f; border-color: #f1c40f; color: #111; }
+#end .big:not(.padfocus) { background: #145a46; border-color: var(--accent); color: var(--text); }   /* from the first frame: only the focused button stands out */
 .unit .cnt { color: #f1c40f; }
 #end-title { font-size: 40px; letter-spacing: 2px; }
 #end-sub { font-size: 21px; font-weight: 600; margin: 4px 0 18px; }

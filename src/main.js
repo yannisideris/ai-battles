@@ -1021,10 +1021,10 @@ class Game {
     const secs = 2.2 + text.length * 0.045;
     for (const b of this.bubbles ?? []) if (b.u === cap) b.until = -1;   // replace a bubble the captain still shows
     this.bubbleAt(cap, text, secs);
-    if (who === "foe") this.voice(text, team);
+    if (who === "foe") this.voice(text, team, cap.type);
     return true;
   }
-  voice(text, team) {
+  voice(text, team, type = null) {
     try {
       const el = this.settings.lang === "el";
       // one fixed male voice per language for the whole session: online voices can blink out of the list for a moment
@@ -1050,7 +1050,14 @@ class Game {
       const s = new SpeechSynthesisUtterance(text);
       s.lang = el ? "el-GR" : "en-GB"; if (v) s.voice = v;
       s.pitch = team === "skeleton" ? 0.35 : 1.0; s.rate = team === "skeleton" ? 0.9 : 1.02; s.volume = 0.9;
-      speechSynthesis.cancel(); speechSynthesis.speak(s);
+      // the newer captains: a touch of their own voice (the first captains keep theirs)
+      const tone = { human: { captain_ranged: [1.08, 1.08], captain_heavy: [0.82, 0.95] }, skeleton: { captain_ranged: [0.5, 0.92], captain_heavy: [0.22, 0.82] } }[team]?.[type];
+      if (tone) { s.pitch = tone[0]; s.rate = tone[1]; }
+      // cancel + speak in the same moment makes Chrome / Edge drop the new line (and sometimes go mute for good):
+      // when something is still being said, cut it, then speak a moment later; resume() wakes a stalled engine
+      speechSynthesis.resume();
+      if (speechSynthesis.speaking || speechSynthesis.pending) { speechSynthesis.cancel(); setTimeout(() => { speechSynthesis.resume(); speechSynthesis.speak(s); }, 120); }
+      else speechSynthesis.speak(s);
     } catch {}
   }
   // plan changes of either general -> the matching captain says something
